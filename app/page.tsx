@@ -4,6 +4,34 @@ import { ChangeEvent, useState } from "react";
 
 type JsonValue = string | number | boolean | null | JsonObject | JsonValue[];
 type JsonObject = { [key: string]: JsonValue };
+type CategoryKey = "objects" | "lighting" | "camera" | "text";
+
+const CATEGORY_DEFINITIONS: {
+  key: CategoryKey;
+  title: string;
+  keywords: string[];
+}[] = [
+  {
+    key: "objects",
+    title: "Objects/Furniture",
+    keywords: ["object", "objects", "furniture", "item", "asset", "props", "room", "scene"],
+  },
+  {
+    key: "lighting",
+    title: "Lighting & Weather",
+    keywords: ["light", "lighting", "weather", "sun", "shadow", "exposure", "rain", "fog"],
+  },
+  {
+    key: "camera",
+    title: "Camera/Perspective",
+    keywords: ["camera", "perspective", "focal", "lens", "angle", "framing"],
+  },
+  {
+    key: "text",
+    title: "Text/Logos",
+    keywords: ["text", "logo", "caption", "title", "typography", "font", "label"],
+  },
+];
 
 function isJsonObject(value: JsonValue): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -22,6 +50,10 @@ function labelFromPath(path: string[]): string {
   return formatKeyLabel(lastPart || "Value");
 }
 
+function isNumericString(value: string): boolean {
+  return /^[0-9]+$/.test(value);
+}
+
 function updateValueAtPath(root: JsonValue, path: string[], nextValue: JsonValue): JsonValue {
   if (path.length === 0) {
     return nextValue;
@@ -31,19 +63,36 @@ function updateValueAtPath(root: JsonValue, path: string[], nextValue: JsonValue
 
   if (Array.isArray(root)) {
     const index = Number(head);
+    if (!Number.isInteger(index) || index < 0 || index >= root.length) {
+      return root;
+    }
     const cloned = [...root];
     cloned[index] = updateValueAtPath(cloned[index], tail, nextValue);
     return cloned;
   }
 
   if (isJsonObject(root)) {
+    const currentChild = root[head];
+    if (typeof currentChild === "undefined") {
+      return root;
+    }
     return {
       ...root,
-      [head]: updateValueAtPath(root[head], tail, nextValue),
+      [head]: updateValueAtPath(currentChild, tail, nextValue),
     };
   }
 
   return root;
+}
+
+function inferCategoryForKey(key: string): CategoryKey | null {
+  const lowerKey = key.toLowerCase();
+  for (const category of CATEGORY_DEFINITIONS) {
+    if (category.keywords.some((keyword) => lowerKey.includes(keyword))) {
+      return category.key;
+    }
+  }
+  return null;
 }
 
 export default function Home() {
@@ -103,11 +152,17 @@ export default function Home() {
     URL.revokeObjectURL(url);
   };
 
-  const renderEditor = (value: JsonValue, path: string[] = []): React.ReactNode => {
+  const renderEditor = (
+    value: JsonValue,
+    path: string[] = [],
+    forcedLabel?: string,
+  ): React.ReactNode => {
+    const fieldLabel = forcedLabel ?? labelFromPath(path);
+
     if (typeof value === "string") {
       return (
         <label className="grid gap-2">
-          <span className="text-sm font-semibold text-zinc-700">{labelFromPath(path)}</span>
+          <span className="text-sm font-semibold text-zinc-700">{fieldLabel}</span>
           <input
             className="rounded-md border border-zinc-300 bg-white px-3 py-2 text-zinc-900 shadow-sm outline-none ring-indigo-500 focus:ring-2"
             type="text"
@@ -121,7 +176,7 @@ export default function Home() {
     if (typeof value === "number") {
       return (
         <label className="grid gap-2">
-          <span className="text-sm font-semibold text-zinc-700">{labelFromPath(path)}</span>
+          <span className="text-sm font-semibold text-zinc-700">{fieldLabel}</span>
           <input
             className="rounded-md border border-zinc-300 bg-white px-3 py-2 text-zinc-900 shadow-sm outline-none ring-indigo-500 focus:ring-2"
             type="number"
@@ -138,7 +193,7 @@ export default function Home() {
     if (typeof value === "boolean") {
       return (
         <label className="flex items-center justify-between rounded-md border border-zinc-200 bg-white px-3 py-2">
-          <span className="text-sm font-semibold text-zinc-700">{labelFromPath(path)}</span>
+          <span className="text-sm font-semibold text-zinc-700">{fieldLabel}</span>
           <button
             type="button"
             role="switch"
@@ -161,9 +216,11 @@ export default function Home() {
     if (Array.isArray(value)) {
       return (
         <fieldset className="grid gap-3 rounded-lg border border-zinc-300 p-4">
-          <legend className="px-1 text-sm font-semibold text-zinc-600">{labelFromPath(path)}</legend>
+          <legend className="px-1 text-sm font-semibold text-zinc-600">{fieldLabel}</legend>
           {value.map((item, index) => (
-            <div key={`${path.join(".")}.${index}`}>{renderEditor(item, [...path, String(index)])}</div>
+            <div key={`${path.join(".")}.${index}`}>
+              {renderEditor(item, [...path, String(index)], `Item ${index + 1}`)}
+            </div>
           ))}
         </fieldset>
       );
@@ -172,7 +229,7 @@ export default function Home() {
     if (isJsonObject(value)) {
       return (
         <fieldset className="grid gap-3 rounded-lg border border-zinc-300 p-4">
-          <legend className="px-1 text-sm font-semibold text-zinc-600">{labelFromPath(path)}</legend>
+          <legend className="px-1 text-sm font-semibold text-zinc-600">{fieldLabel}</legend>
           {Object.entries(value).map(([key, nestedValue]) => (
             <div key={`${path.join(".")}.${key}`}>{renderEditor(nestedValue, [...path, key])}</div>
           ))}
@@ -182,8 +239,91 @@ export default function Home() {
 
     return (
       <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-        {labelFromPath(path)} is null and is not editable in this view.
+        {fieldLabel} is null and is not editable in this view.
       </div>
+    );
+  };
+
+  const renderCategorizedSections = () => {
+    if (workflowData === null) {
+      return null;
+    }
+
+    if (!isJsonObject(workflowData)) {
+      return (
+        <section className="grid gap-4 rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
+          <h2 className="text-xl font-semibold text-zinc-900">Workflow Fields</h2>
+          {renderEditor(workflowData, [], "Root")}
+        </section>
+      );
+    }
+
+    const categorizedEntries: Record<CategoryKey, Array<[string, JsonValue]>> = {
+      objects: [],
+      lighting: [],
+      camera: [],
+      text: [],
+    };
+    const uncategorizedEntries: Array<[string, JsonValue]> = [];
+
+    for (const [key, value] of Object.entries(workflowData)) {
+      const category = inferCategoryForKey(key);
+      if (category) {
+        categorizedEntries[category].push([key, value]);
+      } else {
+        uncategorizedEntries.push([key, value]);
+      }
+    }
+
+    return (
+      <section className="grid gap-4 rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
+        <h2 className="text-xl font-semibold text-zinc-900">Editable Workflow Fields</h2>
+        <p className="text-sm text-zinc-600">
+          Complex nested objects and arrays are fully editable. Expand sections to edit each category.
+        </p>
+
+        <div className="grid gap-3">
+          {CATEGORY_DEFINITIONS.map((categoryDefinition) => {
+            const entries = categorizedEntries[categoryDefinition.key];
+            return (
+              <details
+                key={categoryDefinition.key}
+                className="rounded-lg border border-zinc-300 bg-zinc-50 p-4"
+                open={entries.length > 0}
+              >
+                <summary className="cursor-pointer text-base font-semibold text-zinc-800">
+                  {categoryDefinition.title} ({entries.length})
+                </summary>
+                <div className="mt-4 grid gap-3">
+                  {entries.length === 0 ? (
+                    <p className="text-sm text-zinc-500">No matching fields in uploaded JSON.</p>
+                  ) : (
+                    entries.map(([key, value]) => (
+                      <div key={key}>{renderEditor(value, [key], formatKeyLabel(key))}</div>
+                    ))
+                  )}
+                </div>
+              </details>
+            );
+          })}
+
+          <details className="rounded-lg border border-zinc-300 bg-zinc-50 p-4" open>
+            <summary className="cursor-pointer text-base font-semibold text-zinc-800">
+              Other Properties ({uncategorizedEntries.length})
+            </summary>
+            <div className="mt-4 grid gap-3">
+              {uncategorizedEntries.length === 0 ? (
+                <p className="text-sm text-zinc-500">No uncategorized fields.</p>
+              ) : (
+                uncategorizedEntries.map(([key, value]) => {
+                  const path = isNumericString(key) ? [String(Number(key))] : [key];
+                  return <div key={key}>{renderEditor(value, path, formatKeyLabel(key))}</div>;
+                })
+              )}
+            </div>
+          </details>
+        </div>
+      </section>
     );
   };
 
@@ -217,10 +357,7 @@ export default function Home() {
 
         {workflowData !== null && (
           <>
-            <section className="grid gap-4 rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
-              <h2 className="text-xl font-semibold text-zinc-900">Editable Workflow Fields</h2>
-              <div className="grid gap-4">{renderEditor(workflowData)}</div>
-            </section>
+            {renderCategorizedSections()}
 
             <button
               type="button"
