@@ -133,7 +133,7 @@ function FieldEditor({
     onChange(path, raw);
   };
 
-  const labelCls = "text-xs font-mono font-semibold tracking-wide break-all max-w-[200px]";
+  const labelCls = "text-xs font-mono font-semibold tracking-wide whitespace-nowrap overflow-hidden text-ellipsis max-w-[160px] inline-block";
 
   const keyLabel = (
     <span
