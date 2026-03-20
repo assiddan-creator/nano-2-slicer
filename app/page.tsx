@@ -428,6 +428,7 @@ export default function Page() {
   const [data, setData] = useState<JsonValue>(null);
   const [parseError, setParseError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [copiedPrompt, setCopiedPrompt] = useState<number | null>(null);
   const [view, setView] = useState<"form" | "raw">("form");
 
   const handleParse = useCallback(() => {
@@ -459,6 +460,33 @@ export default function Page() {
 
   const hasData = data !== null;
 
+  const promptLibrary = [
+    {
+      label: "🔍 חילוץ JSON כללי",
+      description: "מחלץ כל מידע מובנה מהתמונה",
+      prompt:
+        "Look at this image carefully. Identify all structured data visible — text, labels, numbers, tables, forms, UI elements, or any data that can be represented as key-value pairs. Extract everything into a single valid JSON object with descriptive English keys. Be thorough and capture every piece of information visible. Return ONLY valid JSON, no markdown, no explanation, no code fences.",
+    },
+    {
+      label: "📋 טבלה / רשימה",
+      description: "ממיר טבלאות ורשימות ל-JSON",
+      prompt:
+        "This image contains a table, list, or structured form. Extract all rows and columns into a JSON object. If it is a table, return an array of objects where each object represents a row and keys are the column headers. If it is a list, return an array of strings or objects. Preserve all values exactly as they appear. Return ONLY valid JSON, no markdown, no explanation, no code fences.",
+    },
+    {
+      label: "🖼️ תיאור תמונה",
+      description: "מתאר את התמונה כ-JSON מפורט",
+      prompt:
+        "Analyze this image in detail and return a JSON object with these keys: subject (main subject or scene description), objects (array of all identifiable objects), colors (array of dominant colors as hex strings), mood (the overall mood or atmosphere), text (any visible text as a string, or null), composition (portrait/landscape/square and any notable framing), quality (estimated image quality: low/medium/high), tags (array of 5-10 descriptive tags). Return ONLY valid JSON, no markdown, no explanation, no code fences.",
+    },
+    {
+      label: "⚙️ הגדרות / קונפיגורציה",
+      description: "מחלץ פרמטרים טכניים וערכים",
+      prompt:
+        "This image shows settings, configuration, parameters, a dashboard, or technical data. Extract all visible settings, values, toggles, fields, and parameters into a JSON object. Use the exact label names as keys (translated to camelCase English if in another language) and the current values as values. Booleans for toggles, numbers for numeric fields, strings for text fields. Return ONLY valid JSON, no markdown, no explanation, no code fences.",
+    },
+  ];
+
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 font-mono">
       {/* ── Header ── */}
@@ -478,6 +506,37 @@ export default function Page() {
       <main className="p-6 max-w-5xl mx-auto space-y-6">
         {/* ── Input Area ── */}
         <section className="space-y-2">
+          <div>
+            <p className="text-xs uppercase tracking-widest text-zinc-500 mb-2">
+              📋 ספריית פרומפטים לתמונה
+            </p>
+            <div className="grid grid-cols-2 gap-2 mb-4">
+              {promptLibrary.map((promptItem, i) => (
+                <button
+                  key={promptItem.label}
+                  onClick={() => {
+                    navigator.clipboard.writeText(promptLibrary[i].prompt).then(() => {
+                      setCopiedPrompt(i);
+                      setTimeout(() => setCopiedPrompt(null), 2000);
+                    });
+                  }}
+                  className={
+                    "text-left p-3 rounded-lg border transition-all focus:outline-none focus:ring-2 focus:ring-yellow-400 focus:ring-offset-2 focus:ring-offset-zinc-950 bg-zinc-900 " +
+                    (copiedPrompt === i
+                      ? "border-emerald-500"
+                      : "border-zinc-700 hover:border-yellow-500")
+                  }
+                  type="button"
+                >
+                  <div className="text-sm font-semibold text-zinc-100 flex items-center gap-1">
+                    {copiedPrompt === i ? "✓ " : ""}
+                    {promptLibrary[i].label}
+                  </div>
+                  <div className="text-xs text-zinc-500 mt-1">{promptLibrary[i].description}</div>
+                </button>
+              ))}
+            </div>
+          </div>
           <label className="text-xs text-zinc-400 uppercase tracking-widest">הדבק JSON כאן</label>
           <textarea
             value={raw}
