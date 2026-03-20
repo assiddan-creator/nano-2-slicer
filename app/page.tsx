@@ -41,7 +41,7 @@ function isJsonObject(value: JsonValue): value is JsonObject {
 
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback } from "react";
 
 // ─── Robust JSON Parser ───────────────────────────────────────────────────────
 
@@ -102,309 +102,39 @@ interface JsonObject {
 }
 type JsonArray = JsonValue[];
 
-// ─── Field Editor ─────────────────────────────────────────────────────────────
+// ─── Flat editor helper ──────────────────────────────────────────────────────
 
-interface FieldProps {
-  path: string[];
-  keyName: string;
-  value: JsonValue;
-  onChange: (path: string[], newVal: JsonValue) => void;
-  onDelete: (path: string[]) => void;
-  depth: number;
-}
-
-function FieldEditor({
-  path,
-  keyName,
-  value,
-  onChange,
-  onDelete,
-  depth,
-}: FieldProps) {
-  const [collapsed, setCollapsed] = useState(false);
-  const indent = depth * 16;
-
-  const handlePrimitive = (raw: string) => {
-    if (raw === "true") return onChange(path, true);
-    if (raw === "false") return onChange(path, false);
-    if (raw === "null") return onChange(path, null);
-    const num = Number(raw);
-    if (!isNaN(num) && raw.trim() !== "") return onChange(path, num);
-    onChange(path, raw);
-  };
-
-  const labelCls = "text-xs font-mono font-semibold tracking-wide whitespace-nowrap overflow-hidden text-ellipsis max-w-[160px] inline-block";
-
-  const keyLabel = (
-    <span
-      className={`${labelCls} ${
-        depth === 0
-          ? "text-yellow-300"
-          : depth === 1
-            ? "text-emerald-300"
-            : "text-sky-300"
-      }`}
-    >
-      {keyName}
-    </span>
-  );
-
-  const deleteBtn = (
-    <button
-      onClick={() => onDelete(path)}
-      title="מחק שדה"
-      className="ml-1 opacity-0 group-hover:opacity-100 transition-opacity
-                 text-rose-400 hover:text-rose-200 text-xs font-bold leading-none
-                 focus:outline-none focus:opacity-100"
-      aria-label={`מחק ${keyName}`}
-    >
-      ✕
-    </button>
-  );
-
-  // ── Object ──
-  if (value !== null && typeof value === "object" && !Array.isArray(value)) {
-    const obj = value as JsonObject;
-    return (
-      <div style={{ marginLeft: indent }} className="my-1">
-        <div className="flex items-center gap-1 group">
-          <button
-            onClick={() => setCollapsed((c) => !c)}
-            className="text-zinc-400 hover:text-white focus:outline-none text-xs w-4 text-center"
-            aria-expanded={!collapsed}
-          >
-            {collapsed ? "▶" : "▼"}
-          </button>
-          {keyLabel}
-          <span className="text-zinc-500 text-xs ml-1">
-            {"{"}
-            {Object.keys(obj).length}
-            {"}"}
-          </span>
-          {deleteBtn}
-        </div>
-        {!collapsed && (
-          <div className="border-l border-zinc-700 ml-2 pl-2 mt-1">
-            {Object.entries(obj).map(([k, v]) => (
-              <FieldEditor
-                key={k}
-                path={[...path, k]}
-                keyName={k}
-                value={v}
-                onChange={onChange}
-                onDelete={onDelete}
-                depth={depth + 1}
-              />
-            ))}
-            <AddFieldRow path={path} value={obj} onChange={onChange} />
-          </div>
-        )}
-      </div>
-    );
+function flattenJson(
+  obj: JsonValue,
+  prefix: string[] = []
+): { path: string[]; label: string; value: JsonPrimitive }[] {
+  const results: { path: string[]; label: string; value: JsonPrimitive }[] = [];
+  if (obj === null || typeof obj !== "object") {
+    results.push({
+      path: prefix,
+      label: prefix.join(" › "),
+      value: obj as JsonPrimitive,
+    });
+    return results;
   }
-
-  // ── Array ──
-  if (Array.isArray(value)) {
-    return (
-      <div style={{ marginLeft: indent }} className="my-1">
-        <div className="flex items-center gap-1 group">
-          <button
-            onClick={() => setCollapsed((c) => !c)}
-            className="text-zinc-400 hover:text-white focus:outline-none text-xs w-4 text-center"
-            aria-expanded={!collapsed}
-          >
-            {collapsed ? "▶" : "▼"}
-          </button>
-          {keyLabel}
-          <span className="text-zinc-500 text-xs ml-1">[{value.length}]</span>
-          {deleteBtn}
-        </div>
-        {!collapsed && (
-          <div className="border-l border-zinc-700 ml-2 pl-2 mt-1">
-            {value.map((item, i) => (
-              <FieldEditor
-                key={i}
-                path={[...path, String(i)]}
-                keyName={String(i)}
-                value={item}
-                onChange={onChange}
-                onDelete={onDelete}
-                depth={depth + 1}
-              />
-            ))}
-            <button
-              onClick={() => {
-                const newArr = [...value, ""];
-                onChange(path, newArr);
-              }}
-              className="mt-1 text-xs text-zinc-400 hover:text-yellow-300
-                         focus:outline-none focus:text-yellow-300 transition-colors"
-            >
-              + הוסף פריט
-            </button>
-          </div>
-        )}
-      </div>
-    );
+  if (Array.isArray(obj)) {
+    obj.forEach((item, i) => {
+      results.push(...flattenJson(item, [...prefix, String(i)]));
+    });
+  } else {
+    Object.entries(obj as JsonObject).forEach(([k, v]) => {
+      if (v === null || typeof v !== "object") {
+        results.push({
+          path: [...prefix, k],
+          label: [...prefix, k].join(" › "),
+          value: v as JsonPrimitive,
+        });
+      } else {
+        results.push(...flattenJson(v as JsonValue, [...prefix, k]));
+      }
+    });
   }
-
-  // ── Primitive ──
-  const strVal = value === null ? "null" : String(value);
-  const isLong = typeof value === "string" && value.length > 60;
-  const isColorHexString =
-    typeof value === "string" && /^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$/.test(value as string);
-
-  return (
-    <div style={{ marginLeft: indent }} className="my-1.5 flex items-center gap-2 group">
-      <span className="w-4" />
-      {keyLabel}
-      <span className="text-zinc-600 text-xs">:</span>
-      {isColorHexString ? (
-        <div className="flex items-center gap-2 flex-1">
-          <div className="relative flex-shrink-0">
-            <input
-              type="color"
-              defaultValue={value as string}
-              onBlur={(e) => onChange(path, e.target.value)}
-              onChange={(e) => onChange(path, e.target.value)}
-              className="w-10 h-9 rounded-lg cursor-pointer border-2 border-zinc-600 bg-transparent p-0.5 focus:outline-none focus:border-yellow-400 hover:border-yellow-500 transition-colors"
-              title="לחץ לבחירת צבע"
-            />
-          </div>
-          <input
-            type="text"
-            defaultValue={value as string}
-            onBlur={(e) => onChange(path, e.target.value)}
-            className="flex-1 bg-zinc-800 text-zinc-100 text-xs font-mono rounded px-2 py-1 border border-zinc-700 focus:border-yellow-400 focus:outline-none h-7"
-            dir="ltr"
-          />
-          <div
-            className="w-8 h-8 rounded-lg border-2 border-zinc-500 flex-shrink-0 shadow-lg"
-            style={{ backgroundColor: value as string }}
-            title={value as string}
-          />
-        </div>
-      ) : isLong ? (
-        <textarea
-          defaultValue={strVal}
-          onBlur={(e) => handlePrimitive(e.target.value)}
-          rows={2}
-          className="flex-1 bg-zinc-800 text-zinc-100 text-xs font-mono rounded
-                     px-2 py-1 border border-zinc-700 focus:border-yellow-400
-                     focus:outline-none resize-y min-h-[40px]"
-          dir="auto"
-        />
-      ) : (
-        <input
-          type="text"
-          defaultValue={strVal}
-          onBlur={(e) => handlePrimitive(e.target.value)}
-          className="flex-1 bg-zinc-900 text-zinc-100 text-sm font-mono rounded-lg px-3 py-2 border border-zinc-700 focus:border-yellow-400 focus:outline-none h-9"
-          dir="auto"
-        />
-      )}
-      {typeof value === "boolean" && (
-        <button
-          onClick={() => onChange(path, !value)}
-          className={`text-xs px-2 py-0.5 rounded font-mono font-bold border
-            transition-colors focus:outline-none
-            ${
-              value
-                ? "border-emerald-500 text-emerald-300 hover:bg-emerald-900"
-                : "border-zinc-600 text-zinc-400 hover:bg-zinc-700"
-            }`}
-        >
-          {value ? "true" : "false"}
-        </button>
-      )}
-      {deleteBtn}
-    </div>
-  );
-}
-
-// ─── Add Field Row ─────────────────────────────────────────────────────────────
-
-function AddFieldRow({
-  path,
-  value,
-  onChange,
-}: {
-  path: string[];
-  value: JsonObject;
-  onChange: (path: string[], newVal: JsonValue) => void;
-}) {
-  const [adding, setAdding] = useState(false);
-  const [newKey, setNewKey] = useState("");
-  const [newVal, setNewVal] = useState("");
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  const commit = () => {
-    const k = newKey.trim();
-    if (!k) return;
-    let parsed: JsonValue = newVal;
-    if (newVal === "true") parsed = true;
-    else if (newVal === "false") parsed = false;
-    else if (newVal === "null") parsed = null;
-    else if (!isNaN(Number(newVal)) && newVal.trim() !== "") parsed = Number(newVal);
-    onChange(path, { ...value, [k]: parsed });
-    setNewKey("");
-    setNewVal("");
-    setAdding(false);
-  };
-
-  if (!adding) {
-    return (
-      <button
-        onClick={() => {
-          setAdding(true);
-          setTimeout(() => inputRef.current?.focus(), 50);
-        }}
-        className="mt-1 text-xs text-zinc-500 hover:text-yellow-300
-                   focus:outline-none focus:text-yellow-300 transition-colors"
-      >
-        + הוסף שדה
-      </button>
-    );
-  }
-
-  return (
-    <div className="mt-1 flex items-center gap-1 flex-wrap">
-      <input
-        ref={inputRef}
-        value={newKey}
-        onChange={(e) => setNewKey(e.target.value)}
-        placeholder="מפתח"
-        className="bg-zinc-800 text-zinc-100 text-xs font-mono rounded
-                   px-2 py-1 border border-yellow-600 focus:outline-none w-28 h-7"
-        dir="ltr"
-        onKeyDown={(e) => e.key === "Enter" && commit()}
-      />
-      <span className="text-zinc-500 text-xs">:</span>
-      <input
-        value={newVal}
-        onChange={(e) => setNewVal(e.target.value)}
-        placeholder="ערך"
-        className="bg-zinc-800 text-zinc-100 text-xs font-mono rounded
-                   px-2 py-1 border border-yellow-600 focus:outline-none w-32 h-7"
-        dir="auto"
-        onKeyDown={(e) => e.key === "Enter" && commit()}
-      />
-      <button
-        onClick={commit}
-        className="text-xs px-2 py-1 bg-yellow-500 text-black font-bold rounded
-                   hover:bg-yellow-400 focus:outline-none"
-      >
-        ✓
-      </button>
-      <button
-        onClick={() => setAdding(false)}
-        className="text-xs px-2 py-1 text-zinc-500 hover:text-zinc-200
-                   focus:outline-none"
-      >
-        ביטול
-      </button>
-    </div>
-  );
+  return results;
 }
 
 // ─── Deep helpers ─────────────────────────────────────────────────────────────
@@ -452,11 +182,6 @@ export default function Page() {
   const [data, setData] = useState<JsonValue>(null);
   const [parseError, setParseError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const [copiedPrompt, setCopiedPrompt] = useState<number | null>(null);
-  // kept for backward compatibility with earlier prompt-copy UX
-  void copiedPrompt;
-  void setCopiedPrompt;
-  const [view, setView] = useState<"form" | "raw">("form");
 
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imageBase64, setImageBase64] = useState<string | null>(null);
@@ -488,14 +213,6 @@ export default function Page() {
       setData(parsed as JsonValue);
     }
   }, [raw]);
-
-  const handleChange = useCallback((path: string[], newVal: JsonValue) => {
-    setData((prev) => deepSet(prev, path, newVal));
-  }, []);
-
-  const handleDelete = useCallback((path: string[]) => {
-    setData((prev) => deepDelete(prev, path));
-  }, []);
 
   const handleCopy = useCallback(async () => {
     if (data === null) return;
@@ -870,34 +587,10 @@ export default function Page() {
               {parseError && <span className="text-xs text-rose-400">{parseError}</span>}
             </div>
 
-            {/* Form/Raw toggle + Copy */}
+            {/* Flat JSON Editor + Copy */}
             {data !== null && (
               <>
-                <div className="flex items-center justify-between">
-                  <div className="flex bg-zinc-800 border border-zinc-700 rounded-lg p-0.5 gap-0.5">
-                    <button
-                      onClick={() => setView("form")}
-                      className={`px-3 py-1 text-xs font-semibold rounded-md transition-colors focus:outline-none ${
-                        view === "form"
-                          ? "bg-yellow-400 text-black"
-                          : "text-zinc-400 hover:text-zinc-100"
-                      }`}
-                      type="button"
-                    >
-                      📋 טופס
-                    </button>
-                    <button
-                      onClick={() => setView("raw")}
-                      className={`px-3 py-1 text-xs font-semibold rounded-md transition-colors focus:outline-none ${
-                        view === "raw"
-                          ? "bg-yellow-400 text-black"
-                          : "text-zinc-400 hover:text-zinc-100"
-                      }`}
-                      type="button"
-                    >
-                      {"{ }"} גולמי
-                    </button>
-                  </div>
+                <div className="flex items-center justify-end">
                   <button
                     onClick={handleCopy}
                     className={`px-3 py-1.5 text-xs font-bold rounded-lg border transition-all focus:outline-none ${
@@ -911,44 +604,85 @@ export default function Page() {
                   </button>
                 </div>
 
-                {view === "form" && (
-                  <div className="bg-zinc-800 rounded-xl px-4 py-4 max-h-[500px] overflow-y-auto space-y-1">
-                    {Array.isArray(data) ? (
-                      (data as JsonArray).map((item, i) => (
-                        <FieldEditor
-                          key={i}
-                          path={[String(i)]}
-                          keyName={String(i)}
-                          value={item}
-                          onChange={handleChange}
-                          onDelete={handleDelete}
-                          depth={0}
-                        />
-                      ))
-                    ) : (
-                      Object.entries(data as JsonObject).map(([k, v]) => (
-                        <FieldEditor
-                          key={k}
-                          path={[k]}
-                          keyName={k}
-                          value={v}
-                          onChange={handleChange}
-                          onDelete={handleDelete}
-                          depth={0}
-                        />
-                      ))
-                    )}
-                  </div>
-                )}
-
-                {view === "raw" && (
-                  <pre
-                    className="bg-zinc-800 rounded-xl px-3 py-3 text-xs text-zinc-300 overflow-auto max-h-96"
-                    dir="ltr"
-                  >
-                    {JSON.stringify(data, null, 2)}
-                  </pre>
-                )}
+                {data !== null &&
+                  (() => {
+                    const flat = flattenJson(data);
+                    return (
+                      <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-1">
+                        {flat.map((entry, i) => {
+                          const isColor =
+                            typeof entry.value === "string" &&
+                            /^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$/.test(entry.value);
+                          const isLong =
+                            typeof entry.value === "string" && entry.value.length > 40;
+                          return (
+                            <div key={i} className="flex items-start gap-3 group">
+                              <span className="text-xs text-zinc-400 font-mono pt-2 min-w-[140px] max-w-[180px] break-words leading-tight flex-shrink-0">
+                                {entry.label}
+                              </span>
+                              <div className="flex-1 flex items-center gap-2">
+                                {isColor && (
+                                  <input
+                                    type="color"
+                                    defaultValue={entry.value as string}
+                                    onChange={(e) => {
+                                      setData((prev) => deepSet(prev, entry.path, e.target.value));
+                                    }}
+                                    className="w-10 h-9 rounded-lg cursor-pointer border-2 border-zinc-600 bg-transparent p-0.5 focus:outline-none hover:border-yellow-500 transition-colors flex-shrink-0"
+                                  />
+                                )}
+                                {isLong ? (
+                                  <textarea
+                                    defaultValue={
+                                      entry.value === null ? "null" : String(entry.value)
+                                    }
+                                    onBlur={(e) => {
+                                      let v: JsonValue = e.target.value;
+                                      if (v === "true") v = true;
+                                      else if (v === "false") v = false;
+                                      else if (v === "null") v = null;
+                                      else if (
+                                        !isNaN(Number(v)) &&
+                                        v.trim() !== ""
+                                      ) {
+                                        v = Number(v);
+                                      }
+                                      setData((prev) => deepSet(prev, entry.path, v));
+                                    }}
+                                    rows={2}
+                                    dir="auto"
+                                    className="flex-1 bg-zinc-800 text-zinc-100 text-sm font-mono rounded-lg px-3 py-2 border border-zinc-700 focus:border-yellow-400 focus:outline-none resize-none"
+                                  />
+                                ) : (
+                                  <input
+                                    type="text"
+                                    defaultValue={
+                                      entry.value === null ? "null" : String(entry.value)
+                                    }
+                                    onBlur={(e) => {
+                                      let v: JsonValue = e.target.value;
+                                      if (v === "true") v = true;
+                                      else if (v === "false") v = false;
+                                      else if (v === "null") v = null;
+                                      else if (
+                                        !isNaN(Number(v)) &&
+                                        v.trim() !== ""
+                                      ) {
+                                        v = Number(v);
+                                      }
+                                      setData((prev) => deepSet(prev, entry.path, v));
+                                    }}
+                                    dir="auto"
+                                    className="flex-1 bg-zinc-800 text-zinc-100 text-sm font-mono rounded-lg px-3 py-2 border border-zinc-700 focus:border-yellow-400 focus:outline-none h-9"
+                                  />
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })()}
               </>
             )}
           </div>
