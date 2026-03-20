@@ -102,36 +102,41 @@ export default function Home() {
   const [promptCopiedIndex, setPromptCopiedIndex] = useState<number | null>(null);
 
   const handleLoadJson = (text: string) => {
-    const sanitizedText = text
+    const rawInput = text
       // Common invisible characters from copy/paste and chat tools.
       .replace(/[\u00A0\u200B\u200C\u200D\u200E\u200F\u202A-\u202E\u2060\uFEFF\u00AD\u061C]/g, " ");
+
     setErrorMessage(null);
+    setWorkflowData(null);
+
     try {
-      // Users often paste surrounding text (e.g. explanations, code fences).
-      // Extract the first JSON object/array and parse only that block.
-      const openObjIndex = sanitizedText.indexOf("{");
-      const closeObjIndex = sanitizedText.lastIndexOf("}");
-      const openArrIndex = sanitizedText.indexOf("[");
-      const closeArrIndex = sanitizedText.lastIndexOf("]");
+      const parsed = JSON.parse(rawInput.trim()) as JsonValue;
+      setWorkflowData(parsed);
+      return;
+    } catch (directErr) {
+      const directMessage =
+        directErr instanceof Error ? directErr.message : String(directErr ?? "Unknown parse error");
+      console.error("JSON.parse (direct) error:", directMessage);
+    }
 
-      const hasObject = openObjIndex !== -1 && closeObjIndex !== -1 && closeObjIndex >= openObjIndex;
-      const hasArray = openArrIndex !== -1 && closeArrIndex !== -1 && closeArrIndex >= openArrIndex;
+    try {
+      // Extract the first JSON object/array block from messy strings.
+      // Regex is intentionally broad and greedy to capture from the first token to the last closing token.
+      const objMatch = rawInput.match(/{[\s\S]*}/);
+      const arrMatch = rawInput.match(/\[[\s\S]*]/);
 
-      if (!hasObject && !hasArray) {
+      const extracted = objMatch?.[0] ?? arrMatch?.[0];
+      if (!extracted) {
         throw new Error("No JSON block found");
-      }
-
-      // If both exist in the messy string, parse the one that starts first.
-      let extracted: string;
-      if (hasObject && (!hasArray || openObjIndex <= openArrIndex)) {
-        extracted = sanitizedText.slice(openObjIndex, closeObjIndex + 1);
-      } else {
-        extracted = sanitizedText.slice(openArrIndex, closeArrIndex + 1);
       }
 
       const parsed = JSON.parse(extracted) as JsonValue;
       setWorkflowData(parsed);
-    } catch {
+    } catch (extractedErr) {
+      const extractedMessage =
+        extractedErr instanceof Error ? extractedErr.message : String(extractedErr ?? "Unknown parse error");
+      console.error("JSON.parse (extracted) error:", extractedMessage);
+
       setWorkflowData(null);
       setErrorMessage("Invalid JSON. Paste a valid workflow JSON, then press Load JSON.");
     }
