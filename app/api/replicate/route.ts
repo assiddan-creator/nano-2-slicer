@@ -33,13 +33,10 @@ export async function POST(req: NextRequest) {
   });
 
   const prediction = await startRes.json();
-  return NextResponse.json({
-    debug_status: startRes.status,
-    debug_full_response: prediction,
-    id: prediction.id,
-    status: prediction.status,
-    error: prediction.error || null,
-  });
+  if (prediction.error) {
+    return NextResponse.json({ error: prediction.error }, { status: 500 });
+  }
+  return NextResponse.json({ id: prediction.id, status: prediction.status });
 }
 
 export async function GET(req: NextRequest) {
@@ -59,5 +56,13 @@ export async function GET(req: NextRequest) {
   });
 
   const data = await res.json();
-  return NextResponse.json({ status: data.status, output: data.output, error: data.error });
+  let output = data.output;
+  if (
+    output &&
+    typeof output === "object" &&
+    typeof (output as { url?: unknown }).url === "function"
+  ) {
+    output = (output as { url: () => unknown }).url();
+  }
+  return NextResponse.json({ status: data.status, output: output, error: data.error });
 }
