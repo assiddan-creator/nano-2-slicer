@@ -102,26 +102,33 @@ export default function Home() {
   const [promptCopiedIndex, setPromptCopiedIndex] = useState<number | null>(null);
 
   const handleLoadJson = (text: string) => {
-    const sanitizedText = text.replace(/[\u00A0\u200B]/g, " ");
+    const sanitizedText = text
+      // Common invisible characters from copy/paste and chat tools.
+      .replace(/[\u00A0\u200B\u200C\u200D\u200E\u200F\u202A-\u202E\u2060\uFEFF\u00AD\u061C]/g, " ");
     setErrorMessage(null);
     try {
       // Users often paste surrounding text (e.g. explanations, code fences).
       // Extract the first JSON object/array and parse only that block.
       const openObjIndex = sanitizedText.indexOf("{");
+      const closeObjIndex = sanitizedText.lastIndexOf("}");
       const openArrIndex = sanitizedText.indexOf("[");
-      const startIndex =
-        openObjIndex === -1 ? openArrIndex : openArrIndex === -1 ? openObjIndex : Math.min(openObjIndex, openArrIndex);
+      const closeArrIndex = sanitizedText.lastIndexOf("]");
 
-      const lastObjIndex = sanitizedText.lastIndexOf("}");
-      const lastArrIndex = sanitizedText.lastIndexOf("]");
-      const endIndex =
-        lastObjIndex === -1 ? lastArrIndex : lastArrIndex === -1 ? lastObjIndex : Math.max(lastObjIndex, lastArrIndex);
+      const hasObject = openObjIndex !== -1 && closeObjIndex !== -1 && closeObjIndex >= openObjIndex;
+      const hasArray = openArrIndex !== -1 && closeArrIndex !== -1 && closeArrIndex >= openArrIndex;
 
-      if (startIndex === -1 || endIndex === -1 || endIndex < startIndex) {
+      if (!hasObject && !hasArray) {
         throw new Error("No JSON block found");
       }
 
-      const extracted = sanitizedText.slice(startIndex, endIndex + 1);
+      // If both exist in the messy string, parse the one that starts first.
+      let extracted: string;
+      if (hasObject && (!hasArray || openObjIndex <= openArrIndex)) {
+        extracted = sanitizedText.slice(openObjIndex, closeObjIndex + 1);
+      } else {
+        extracted = sanitizedText.slice(openArrIndex, closeArrIndex + 1);
+      }
+
       const parsed = JSON.parse(extracted) as JsonValue;
       setWorkflowData(parsed);
     } catch {
