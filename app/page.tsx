@@ -101,10 +101,27 @@ export default function Home() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [promptCopiedIndex, setPromptCopiedIndex] = useState<number | null>(null);
 
-  const parseJsonText = (text: string) => {
+  const handleLoadJson = (text: string) => {
     setErrorMessage(null);
     try {
-      const parsed = JSON.parse(text) as JsonValue;
+      // Users often paste surrounding text (e.g. explanations, code fences).
+      // Extract the first JSON object/array and parse only that block.
+      const openObjIndex = text.indexOf("{");
+      const openArrIndex = text.indexOf("[");
+      const startIndex =
+        openObjIndex === -1 ? openArrIndex : openArrIndex === -1 ? openObjIndex : Math.min(openObjIndex, openArrIndex);
+
+      const lastObjIndex = text.lastIndexOf("}");
+      const lastArrIndex = text.lastIndexOf("]");
+      const endIndex =
+        lastObjIndex === -1 ? lastArrIndex : lastArrIndex === -1 ? lastObjIndex : Math.max(lastObjIndex, lastArrIndex);
+
+      if (startIndex === -1 || endIndex === -1 || endIndex < startIndex) {
+        throw new Error("No JSON block found");
+      }
+
+      const extracted = text.slice(startIndex, endIndex + 1);
+      const parsed = JSON.parse(extracted) as JsonValue;
       setWorkflowData(parsed);
     } catch {
       setWorkflowData(null);
@@ -414,7 +431,7 @@ export default function Home() {
                 if (!pasted.trim()) return;
                 // Keyboard-only UX: parse immediately after paste.
                 setJsonText(pasted);
-                parseJsonText(pasted);
+                handleLoadJson(pasted);
               }}
               rows={14}
               className="w-full resize-y rounded-md border border-zinc-300 bg-white px-3 py-2 text-zinc-900 shadow-sm outline-none ring-indigo-500 focus:ring-2"
@@ -424,7 +441,7 @@ export default function Home() {
               <button
                 type="button"
                 className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-300"
-                onClick={() => parseJsonText(jsonText)}
+                onClick={() => handleLoadJson(jsonText)}
               >
                 Load JSON
               </button>
