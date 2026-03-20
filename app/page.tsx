@@ -487,6 +487,53 @@ export default function Page() {
     },
   ];
 
+  const appPromptLibrary = [
+    {
+      label: "💄 איפור / Beauty AI",
+      description: "גוון עור, עיניים, שפתיים, סטייל איפור",
+      prompt:
+        `Analyze the face in this image and return a JSON object with these exact keys: skinTone (object with fitzpatrick: number 1-6 and name: string), undertone ("warm"/"cool"/"neutral"), eyeColor (string), eyeshadowColors (array of hex strings, empty array if none), eyeliner (true/false), mascara (true/false), lipColor (hex string), lipFinish ("matte"/"glossy"/"natural"/"none"), blush (hex string or null), contour (true/false), makeupStyle ("no-makeup"/"natural"/"everyday"/"glam"/"editorial"/"avant-garde"), overallLook (short description string). Return ONLY valid JSON, no markdown, no explanation, no code fences.`,
+    },
+    {
+      label: "💈 תסרוקת / BarBerBe",
+      description: "צבע, אורך, סגנון, מרקם שיער",
+      prompt:
+        `Look at the hair in this image and return a JSON object with these exact keys: hairColor (object with hex: string and name: string), isColorTreated (true/false), colorTreatmentType ("highlights"/"balayage"/"ombre"/"full-color"/"bleached"/null), hairLength ("buzz"/"short"/"ear-length"/"chin-length"/"shoulder"/"long"/"very-long"), hairTexture ("straight"/"wavy"/"curly"/"coily"), hairThickness ("fine"/"medium"/"thick"), hairstyleType (string describing the style), facialHair (true/false), facialHairStyle (string or null), scalpVisible (true/false), recommendedProductTypes (array of 2-4 product type strings based on the hair type). Return ONLY valid JSON, no markdown, no explanation, no code fences.`,
+    },
+    {
+      label: "👗 סטיילינג אופנה",
+      description: "בגדים, צבעים, סגנון, אביזרים",
+      prompt:
+        `Analyze the outfit and styling in this image and return a JSON object with these exact keys: topGarment (object with type: string, color: hex, pattern: string or "solid"), bottomGarment (object with type: string, color: hex, pattern: string or "solid", or null if not visible), outerwear (object with type and color, or null), footwear (string or null), accessories (array of strings), colorPalette (array of up to 5 hex strings), fashionStyle ("casual"/"streetwear"/"business-casual"/"formal"/"bohemian"/"sporty"/"vintage"/"minimalist"/"maximalist"), season ("spring"/"summer"/"autumn"/"winter"/"all-season"), occasion ("everyday"/"work"/"evening"/"party"/"sport"/"beach"/"special-event"). Return ONLY valid JSON, no markdown, no explanation, no code fences.`,
+    },
+    {
+      label: "🏠 ריל אסטייט / עיצוב פנים",
+      description: "חדר, סגנון, חומרים, צבעים, ריהוט",
+      prompt:
+        `Analyze this interior image and return a JSON object with these exact keys: roomType ("bedroom"/"living-room"/"kitchen"/"bathroom"/"dining-room"/"office"/"hallway"/"other"), approximateSqm (estimated size as number or null), designStyle ("modern"/"minimalist"/"industrial"/"scandinavian"/"mediterranean"/"bohemian"/"classical"/"rustic"/"art-deco"), dominantColors (array of up to 5 hex strings), wallColor (hex string), floorMaterial ("hardwood"/"tile"/"marble"/"carpet"/"concrete"/"laminate"/"other"), lightingType ("natural"/"artificial"/"mixed"), lightingMood ("bright"/"warm"/"dim"/"dramatic"), furnitureItems (array of strings), condition ("needs-renovation"/"fair"/"good"/"excellent"), estimatedStyle (one-line description string). Return ONLY valid JSON, no markdown, no explanation, no code fences.`,
+    },
+    {
+      label: "🍕 צילומי אוכל",
+      description: "מנה, מרכיבים, צבעים, סגנון צילום",
+      prompt:
+        `Analyze this food image and return a JSON object with these exact keys: dishName (string), cuisineType (string), mainIngredients (array of up to 8 strings), cookingMethod ("fried"/"grilled"/"baked"/"raw"/"steamed"/"boiled"/"mixed"/"unknown"), dominantColors (array of up to 4 hex strings), platingStyle ("rustic"/"fine-dining"/"homestyle"/"street-food"/"minimalist"/"abundant"), servingVessel (string), portionSize ("small"/"medium"/"large"/"sharing"), appetizingScore (number 1-10), dietaryTags (array from: "vegetarian","vegan","gluten-free","dairy-free","meat","seafood","spicy"), photographyQuality ("amateur"/"good"/"professional"), shootingAngle ("top-down"/"45-degree"/"eye-level"/"close-up"). Return ONLY valid JSON, no markdown, no explanation, no code fences.`,
+    },
+  ];
+
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [editablePrompts, setEditablePrompts] = useState(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("nb2_prompts");
+      if (saved) return JSON.parse(saved);
+    }
+    return { general: promptLibrary, apps: appPromptLibrary };
+  });
+
+  const savePrompts = (updated: typeof editablePrompts) => {
+    setEditablePrompts(updated);
+    localStorage.setItem("nb2_prompts", JSON.stringify(updated));
+  };
+
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 font-mono">
       {/* ── Header ── */}
@@ -500,7 +547,16 @@ export default function Page() {
             <p className="text-xs text-zinc-500 mt-0.5">Visual JSON Editor</p>
           </div>
         </div>
-        <div className="text-xs text-zinc-600">עברית-בטוח · ניקוי תווים בלתי נראים</div>
+        <div className="text-xs text-zinc-600 flex items-center gap-3">
+          <span>עברית-בטוח · ניקוי תווים בלתי נראים</span>
+          <button
+            onClick={() => setEditorOpen(true)}
+            className="text-xs px-3 py-1.5 rounded-lg border border-zinc-700 text-zinc-400 hover:border-yellow-500 hover:text-yellow-300 transition-all focus:outline-none"
+            type="button"
+          >
+            ✏️ ערוך פרומפטים
+          </button>
+        </div>
       </header>
 
       <main className="p-6 max-w-5xl mx-auto space-y-6">
@@ -511,11 +567,14 @@ export default function Page() {
               📋 ספריית פרומפטים לתמונה
             </p>
             <div className="grid grid-cols-2 gap-2 mb-4">
-              {promptLibrary.map((promptItem, i) => (
+              {editablePrompts.general.map(
+                (promptItem: { label: string; description: string; prompt: string }, i: number) => (
                 <button
                   key={promptItem.label}
                   onClick={() => {
-                    navigator.clipboard.writeText(promptLibrary[i].prompt).then(() => {
+                    navigator.clipboard
+                      .writeText(editablePrompts.general[i].prompt)
+                      .then(() => {
                       setCopiedPrompt(i);
                       setTimeout(() => setCopiedPrompt(null), 2000);
                     });
@@ -530,11 +589,73 @@ export default function Page() {
                 >
                   <div className="text-sm font-semibold text-zinc-100 flex items-center gap-1">
                     {copiedPrompt === i ? "✓ " : ""}
-                    {promptLibrary[i].label}
+                    {editablePrompts.general[i].label}
                   </div>
-                  <div className="text-xs text-zinc-500 mt-1">{promptLibrary[i].description}</div>
+                  <div className="text-xs text-zinc-500 mt-1">
+                    {editablePrompts.general[i].description}
+                  </div>
                 </button>
               ))}
+            </div>
+
+            <p className="text-xs uppercase tracking-widest text-zinc-500 mb-2 mt-4">🚀 פרומפטים לאפליקציות שלי</p>
+
+            {/* First row — 2 buttons: index 0 and 1 */}
+            <div className="grid grid-cols-2 gap-2 mb-2">
+              {editablePrompts.apps.slice(0, 2).map(
+                (p: { label: string; description: string; prompt: string }, i: number) => (
+                <button
+                  key={i}
+                  onClick={() => {
+                    navigator.clipboard.writeText(p.prompt).then(() => {
+                      setCopiedPrompt(4 + i);
+                      setTimeout(() => setCopiedPrompt(null), 2000);
+                    });
+                  }}
+                  className={
+                    "text-left p-3 rounded-lg border transition-all focus:outline-none focus:ring-2 focus:ring-yellow-400 focus:ring-offset-2 focus:ring-offset-zinc-950 bg-zinc-900 " +
+                    (copiedPrompt === 4 + i
+                      ? "border-emerald-500"
+                      : "border-zinc-700 hover:border-yellow-500")
+                  }
+                >
+                  <div className="text-sm font-semibold text-zinc-100">
+                    {copiedPrompt === 4 + i ? "✓ " : ""}
+                    {p.label}
+                  </div>
+                  <div className="text-xs text-zinc-500 mt-1">{p.description}</div>
+                </button>
+              ),
+              )}
+            </div>
+
+            {/* Second row — 3 buttons: index 2, 3 and 4 */}
+            <div className="grid grid-cols-3 gap-2 mb-4">
+              {editablePrompts.apps.slice(2, 5).map(
+                (p: { label: string; description: string; prompt: string }, i: number) => (
+                <button
+                  key={i + 2}
+                  onClick={() => {
+                    navigator.clipboard.writeText(p.prompt).then(() => {
+                      setCopiedPrompt(6 + i);
+                      setTimeout(() => setCopiedPrompt(null), 2000);
+                    });
+                  }}
+                  className={
+                    "text-left p-3 rounded-lg border transition-all focus:outline-none focus:ring-2 focus:ring-yellow-400 focus:ring-offset-2 focus:ring-offset-zinc-950 bg-zinc-900 " +
+                    (copiedPrompt === 6 + i
+                      ? "border-emerald-500"
+                      : "border-zinc-700 hover:border-yellow-500")
+                  }
+                >
+                  <div className="text-sm font-semibold text-zinc-100">
+                    {copiedPrompt === 6 + i ? "✓ " : ""}
+                    {p.label}
+                  </div>
+                  <div className="text-xs text-zinc-500 mt-1">{p.description}</div>
+                </button>
+              ),
+              )}
             </div>
           </div>
           <label className="text-xs text-zinc-400 uppercase tracking-widest">הדבק JSON כאן</label>
@@ -670,6 +791,100 @@ export default function Page() {
       <footer className="mt-12 pb-6 text-center text-xs text-zinc-700">
         מנקה: U+200B–200D · FEFF · 200E/F · A0 · 202A–202E
       </footer>
+
+      {editorOpen && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-zinc-900 border border-zinc-700 rounded-2xl w-full max-w-3xl max-h-[90vh] flex flex-col">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800">
+              <h2 className="text-base font-bold text-yellow-300">✏️ עורך פרומפטים</h2>
+              <button
+                onClick={() => setEditorOpen(false)}
+                className="text-zinc-500 hover:text-white text-xl focus:outline-none"
+                type="button"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Scrollable content */}
+            <div className="overflow-y-auto flex-1 px-6 py-4 space-y-6">
+              {/* General section */}
+              <div>
+                <p className="text-xs uppercase tracking-widest text-zinc-500 mb-3">📋 פרומפטים כלליים</p>
+                <div className="space-y-4">
+                  {editablePrompts.general.map(
+                    (p: { label: string; description: string; prompt: string }, i: number) => (
+                      <div key={i} className="space-y-1">
+                        <label className="text-sm font-semibold text-zinc-100">{p.label}</label>
+                        <textarea
+                          value={p.prompt}
+                          rows={4}
+                          onChange={(e) => {
+                            const updated = { ...editablePrompts };
+                            updated.general = [...updated.general];
+                            updated.general[i] = { ...updated.general[i], prompt: e.target.value };
+                            savePrompts(updated);
+                          }}
+                          className="w-full bg-zinc-800 text-zinc-200 text-xs font-mono rounded-lg px-3 py-2 border border-zinc-700 focus:border-yellow-500 focus:outline-none resize-y"
+                          dir="ltr"
+                        />
+                      </div>
+                    ),
+                  )}
+                </div>
+              </div>
+
+              {/* Apps section */}
+              <div>
+                <p className="text-xs uppercase tracking-widest text-zinc-500 mb-3">🚀 פרומפטים לאפליקציות שלי</p>
+                <div className="space-y-4">
+                  {editablePrompts.apps.map(
+                    (p: { label: string; description: string; prompt: string }, i: number) => (
+                      <div key={i} className="space-y-1">
+                        <label className="text-sm font-semibold text-zinc-100">{p.label}</label>
+                        <textarea
+                          value={p.prompt}
+                          rows={4}
+                          onChange={(e) => {
+                            const updated = { ...editablePrompts };
+                            updated.apps = [...updated.apps];
+                            updated.apps[i] = { ...updated.apps[i], prompt: e.target.value };
+                            savePrompts(updated);
+                          }}
+                          className="w-full bg-zinc-800 text-zinc-200 text-xs font-mono rounded-lg px-3 py-2 border border-zinc-700 focus:border-yellow-500 focus:outline-none resize-y"
+                          dir="ltr"
+                        />
+                      </div>
+                    ),
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="px-6 py-4 border-t border-zinc-800 flex items-center justify-between">
+              <button
+                onClick={() => {
+                  localStorage.removeItem("nb2_prompts");
+                  setEditablePrompts({ general: promptLibrary, apps: appPromptLibrary });
+                }}
+                className="text-xs text-zinc-500 hover:text-rose-400 transition-colors focus:outline-none"
+                type="button"
+              >
+                ↺ איפוס לברירת מחדל
+              </button>
+              <button
+                onClick={() => setEditorOpen(false)}
+                className="px-4 py-2 bg-yellow-400 text-black text-sm font-bold rounded-lg hover:bg-yellow-300 transition-colors focus:outline-none"
+                type="button"
+              >
+                ✓ סגור ושמור
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
