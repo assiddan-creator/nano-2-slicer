@@ -379,19 +379,62 @@ export default function Page() {
     cameraBody?: string; focalLength?: string; lensType?: string; filmStock?: string;
     aspectRatio?: string; photographerStyle?: string; movieLook?: string; filterEffect?: string;
   }) => {
-    const parts: string[] = ["A photorealistic image."];
-    if (fields.subject) parts.push(`Subject: ${fields.subject}.`);
-    if (fields.angle) parts.push(`Shot angle: ${fields.angle}.`);
-    if (fields.environment) parts.push(`Environment: ${fields.environment}.`);
-    if (fields.mood) parts.push(`Mood and atmosphere: ${fields.mood}.`);
-    if (fields.cameraBody || fields.focalLength || fields.lensType || fields.filmStock) {
-      const gear = [fields.cameraBody, fields.focalLength && `${fields.focalLength} lens`, fields.lensType, fields.filmStock && `${fields.filmStock} film`].filter(Boolean).join(", ");
-      parts.push(`Shot on ${gear}.`);
+    const parts: string[] = [];
+
+    const hasRefs = faceBase64 || outfitBase64 || globalBase64;
+    if (hasRefs) {
+      const refParts: string[] = [];
+      if (faceBase64) refParts.push("the provided face reference as the character's face");
+      if (outfitBase64) refParts.push("the provided outfit reference as the character's clothing");
+      if (globalBase64) refParts.push("the provided image as the global style reference");
+      parts.push(`Create a new photorealistic image by incorporating ${refParts.join(", ")}.`);
+    } else {
+      parts.push("Create a highly detailed photorealistic image.");
     }
-    if (fields.photographerStyle) parts.push(`Photography style inspired by ${fields.photographerStyle}.`);
-    if (fields.movieLook) parts.push(`Cinematic look: ${fields.movieLook}.`);
-    if (fields.filterEffect) parts.push(`Filter/effect: ${fields.filterEffect}.`);
-    if (fields.aspectRatio) parts.push(`Aspect ratio: ${fields.aspectRatio}. No blurred faces.`);
+
+    if (fields.subject) parts.push(`The subject is: ${fields.subject}.`);
+
+    if (fields.angle && fields.environment) {
+      parts.push(`Composed as a ${fields.angle} shot, set ${fields.environment}.`);
+    } else if (fields.angle) {
+      parts.push(`Composed as a ${fields.angle} shot.`);
+    } else if (fields.environment) {
+      parts.push(`The scene takes place ${fields.environment}.`);
+    }
+
+    if (fields.mood) {
+      parts.push(`The scene is illuminated by ${fields.mood}, creating a mood that feels ${fields.mood}.`);
+    }
+
+    const gear: string[] = [];
+    if (fields.cameraBody) gear.push(fields.cameraBody);
+    if (fields.focalLength) gear.push(`${fields.focalLength} lens`);
+    if (fields.lensType) gear.push(fields.lensType);
+    if (fields.filmStock) gear.push(`${fields.filmStock} film stock`);
+    if (gear.length > 0) {
+      parts.push(`Captured with a ${gear.join(", ")}.`);
+    }
+
+    if (fields.photographerStyle) {
+      parts.push(
+        `In the style of photographer ${fields.photographerStyle}, with all the visual characteristics and aesthetic signatures they are known for.`,
+      );
+    }
+
+    if (fields.movieLook) {
+      parts.push(
+        `With the cinematic visual aesthetic of the movie "${fields.movieLook}" — matching its color grading, lighting mood, and visual tone.`,
+      );
+    }
+
+    if (fields.filterEffect) {
+      parts.push(`Applied effect: ${fields.filterEffect}.`);
+    }
+
+    parts.push(
+      `No blurred faces. The image should be in a ${fields.aspectRatio || "16:9"} format. Ultra high quality, sharp details, professional photography.`,
+    );
+
     return parts.join(" ");
   };
 
