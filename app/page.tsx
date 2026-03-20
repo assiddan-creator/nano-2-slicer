@@ -418,9 +418,9 @@ export default function Page() {
       </header>
 
       <main className="p-6 max-w-7xl mx-auto">
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 gap-6">
           {/* ── COLUMN 1: Upload + Extract ── */}
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-4">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-4 min-h-screen">
             <h2 className="text-sm font-bold text-zinc-100 flex items-center gap-2">
               <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-yellow-400 text-black text-xs font-bold">
                 1
@@ -608,7 +608,7 @@ export default function Page() {
                   (() => {
                     const flat = flattenJson(data);
                     return (
-                      <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-1">
+                      <div className="space-y-2">
                         {flat.map((entry, i) => {
                           const isColor =
                             typeof entry.value === "string" &&
