@@ -510,19 +510,79 @@ export default function Page() {
         return;
       }
 
-      const output = data.output;
-      let imageUrl = "";
-      if (Array.isArray(output)) {
-        imageUrl = output[0];
-      } else if (typeof output === "string") {
-        imageUrl = output;
+      const predictionId: string | undefined = data.id;
+      if (!predictionId) {
+        setCreateError("Missing prediction id");
+        return;
       }
 
-      if (imageUrl) {
-        setCreatedImageUrl(imageUrl);
-      } else {
-        setCreateError("המודל לא החזיר תמונה — נסה שוב.");
+      let pollData = data;
+
+      if (pollData.status === "succeeded") {
+        const output = pollData.output;
+        console.log("Replicate output:", JSON.stringify(output));
+        let imageUrl = "";
+        if (Array.isArray(output)) {
+          imageUrl = output[0];
+        } else if (typeof output === "string") {
+          imageUrl = output;
+        } else if (output && typeof output === "object") {
+          const vals = Object.values(output as Record<string, unknown>);
+          imageUrl = vals[0] as string;
+        }
+        if (imageUrl) {
+          setCreatedImageUrl(imageUrl);
+        } else {
+          setCreateError("המודל לא החזיר תמונה. פלט: " + JSON.stringify(output));
+        }
+        return;
       }
+
+      if (pollData.status === "failed" || pollData.status === "canceled") {
+        setCreateError(pollData.error || "Prediction failed");
+        return;
+      }
+
+      let attempts = 0;
+      while (attempts < 60) {
+        await new Promise((r) => setTimeout(r, 3000));
+
+        const pollRes = await fetch(
+          `/api/replicate?id=${encodeURIComponent(predictionId)}`,
+        );
+        pollData = await pollRes.json();
+
+        if (pollData.status === "succeeded") {
+          const output = pollData.output;
+          console.log("Replicate output:", JSON.stringify(output));
+          let imageUrl = "";
+          if (Array.isArray(output)) {
+            imageUrl = output[0];
+          } else if (typeof output === "string") {
+            imageUrl = output;
+          } else if (output && typeof output === "object") {
+            const vals = Object.values(output as Record<string, unknown>);
+            imageUrl = vals[0] as string;
+          }
+          if (imageUrl) {
+            setCreatedImageUrl(imageUrl);
+          } else {
+            setCreateError(
+              "המודל לא החזיר תמונה. פלט: " + JSON.stringify(output),
+            );
+          }
+          return;
+        }
+
+        if (pollData.status === "failed" || pollData.status === "canceled") {
+          setCreateError(pollData.error || "Prediction failed");
+          return;
+        }
+
+        attempts++;
+      }
+
+      setCreateError("Timeout after 3 minutes");
     } catch (e) {
       setCreateError((e as Error).message);
     } finally {
