@@ -102,17 +102,18 @@ export default function Home() {
   const [promptCopiedIndex, setPromptCopiedIndex] = useState<number | null>(null);
 
   const handleLoadJson = (text: string) => {
+    const sanitizedText = text.replace(/[\u00A0\u200B]/g, " ");
     setErrorMessage(null);
     try {
       // Users often paste surrounding text (e.g. explanations, code fences).
       // Extract the first JSON object/array and parse only that block.
-      const openObjIndex = text.indexOf("{");
-      const openArrIndex = text.indexOf("[");
+      const openObjIndex = sanitizedText.indexOf("{");
+      const openArrIndex = sanitizedText.indexOf("[");
       const startIndex =
         openObjIndex === -1 ? openArrIndex : openArrIndex === -1 ? openObjIndex : Math.min(openObjIndex, openArrIndex);
 
-      const lastObjIndex = text.lastIndexOf("}");
-      const lastArrIndex = text.lastIndexOf("]");
+      const lastObjIndex = sanitizedText.lastIndexOf("}");
+      const lastArrIndex = sanitizedText.lastIndexOf("]");
       const endIndex =
         lastObjIndex === -1 ? lastArrIndex : lastArrIndex === -1 ? lastObjIndex : Math.max(lastObjIndex, lastArrIndex);
 
@@ -120,7 +121,7 @@ export default function Home() {
         throw new Error("No JSON block found");
       }
 
-      const extracted = text.slice(startIndex, endIndex + 1);
+      const extracted = sanitizedText.slice(startIndex, endIndex + 1);
       const parsed = JSON.parse(extracted) as JsonValue;
       setWorkflowData(parsed);
     } catch {
