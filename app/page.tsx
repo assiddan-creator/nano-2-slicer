@@ -203,6 +203,31 @@ export default function Page() {
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [changeInstructions, setChangeInstructions] = useState<string>("");
 
+  const [activeTab, setActiveTab] = useState<"create" | "edit">("create");
+  const [createPrompt, setCreatePrompt] = useState<string>("A photorealistic image. No blurred faces. 16:9 format.");
+  const [createdImageUrl, setCreatedImageUrl] = useState<string | null>(null);
+  const [loadingCreate, setLoadingCreate] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+
+  const [subject, setSubject] = useState("");
+  const [angle, setAngle] = useState("");
+  const [environment, setEnvironment] = useState("");
+  const [mood, setMood] = useState("");
+  const [cameraBody, setCameraBody] = useState("");
+  const [focalLength, setFocalLength] = useState("");
+  const [lensType, setLensType] = useState("");
+  const [filmStock, setFilmStock] = useState("");
+  const [aspectRatio, setAspectRatio] = useState("16:9");
+  const [photographerStyle, setPhotographerStyle] = useState("");
+  const [movieLook, setMovieLook] = useState("");
+  const [filterEffect, setFilterEffect] = useState("");
+  const [faceRef, setFaceRef] = useState<string | null>(null);
+  const [outfitRef, setOutfitRef] = useState<string | null>(null);
+  const [globalRef, setGlobalRef] = useState<string | null>(null);
+  const [faceBase64, setFaceBase64] = useState<string | null>(null);
+  const [outfitBase64, setOutfitBase64] = useState<string | null>(null);
+  const [globalBase64, setGlobalBase64] = useState<string | null>(null);
+
   const handleParse = useCallback(() => {
     const { data: parsed, error } = sanitizeAndParse(raw);
     if (error) {
@@ -349,6 +374,76 @@ export default function Page() {
     }
   };
 
+  const rebuildPrompt = (fields: {
+    subject?: string; angle?: string; environment?: string; mood?: string;
+    cameraBody?: string; focalLength?: string; lensType?: string; filmStock?: string;
+    aspectRatio?: string; photographerStyle?: string; movieLook?: string; filterEffect?: string;
+  }) => {
+    const parts: string[] = ["A photorealistic image."];
+    if (fields.subject) parts.push(`Subject: ${fields.subject}.`);
+    if (fields.angle) parts.push(`Shot angle: ${fields.angle}.`);
+    if (fields.environment) parts.push(`Environment: ${fields.environment}.`);
+    if (fields.mood) parts.push(`Mood and atmosphere: ${fields.mood}.`);
+    if (fields.cameraBody || fields.focalLength || fields.lensType || fields.filmStock) {
+      const gear = [fields.cameraBody, fields.focalLength && `${fields.focalLength} lens`, fields.lensType, fields.filmStock && `${fields.filmStock} film`].filter(Boolean).join(", ");
+      parts.push(`Shot on ${gear}.`);
+    }
+    if (fields.photographerStyle) parts.push(`Photography style inspired by ${fields.photographerStyle}.`);
+    if (fields.movieLook) parts.push(`Cinematic look: ${fields.movieLook}.`);
+    if (fields.filterEffect) parts.push(`Filter/effect: ${fields.filterEffect}.`);
+    if (fields.aspectRatio) parts.push(`Aspect ratio: ${fields.aspectRatio}. No blurred faces.`);
+    return parts.join(" ");
+  };
+
+  const handleRefUpload = (file: File, setPreview: (s: string) => void, setBase64: (s: string) => void) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const result = e.target?.result as string;
+      setPreview(result);
+      setBase64(result.split(",")[1]);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleCreateImage = async () => {
+    if (!geminiKey) return;
+    setLoadingCreate(true);
+    setCreateError(null);
+    setCreatedImageUrl(null);
+    try {
+      const parts: { text?: string; inline_data?: { mime_type: string; data: string } }[] = [
+        { text: createPrompt }
+      ];
+      if (faceBase64) parts.push({ inline_data: { mime_type: "image/jpeg", data: faceBase64 } });
+      if (outfitBase64) parts.push({ inline_data: { mime_type: "image/jpeg", data: outfitBase64 } });
+      if (globalBase64) parts.push({ inline_data: { mime_type: "image/jpeg", data: globalBase64 } });
+
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image-preview:generateContent?key=${geminiKey}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{ parts }],
+            generationConfig: { responseModalities: ["TEXT", "IMAGE"] }
+          })
+        }
+      );
+      const result = await response.json();
+      const resParts = result?.candidates?.[0]?.content?.parts || [];
+      const imagePart = resParts.find((p: { inlineData?: { mimeType: string; data: string } }) => p.inlineData?.mimeType?.startsWith("image/"));
+      if (imagePart) {
+        setCreatedImageUrl(`data:${imagePart.inlineData.mimeType};base64,${imagePart.inlineData.data}`);
+      } else {
+        setCreateError("ג'מיני לא החזיר תמונה — נסה שוב.");
+      }
+    } catch (e) {
+      setCreateError((e as Error).message);
+    } finally {
+      setLoadingCreate(false);
+    }
+  };
+
   const handleGenerateImage = async () => {
     if (!imageBase64 || !geminiKey || !data) return;
     setLoadingGenerate(true);
@@ -417,6 +512,247 @@ export default function Page() {
         </button>
       </header>
 
+      {/* ── Tab Switcher ── */}
+      <div className="flex gap-0 border-b border-zinc-800 px-6">
+        <button
+          onClick={() => setActiveTab("create")}
+          className={`px-6 py-3 text-sm font-bold transition-all focus:outline-none border-b-2 ${activeTab === "create" ? "border-yellow-400 text-yellow-300" : "border-transparent text-zinc-500 hover:text-zinc-300"}`}
+        >
+          🎬 צור תמונה חדשה
+        </button>
+        <button
+          onClick={() => setActiveTab("edit")}
+          className={`px-6 py-3 text-sm font-bold transition-all focus:outline-none border-b-2 ${activeTab === "edit" ? "border-yellow-400 text-yellow-300" : "border-transparent text-zinc-500 hover:text-zinc-300"}`}
+        >
+          ✏️ ערוך תמונה קיימת
+        </button>
+      </div>
+
+      {/* ── TAB 1: Create ── */}
+      {activeTab === "create" && (
+        <div className="p-6 max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+          {/* LEFT — all form fields */}
+          <div className="space-y-6">
+
+            {/* Section 1 — Subject */}
+            <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-4">
+              <h3 className="text-sm font-bold text-yellow-300 uppercase tracking-widest">01. נושא וסצנה</h3>
+              <div className="space-y-1">
+                <label className="text-xs text-zinc-500">תיאור הנושא</label>
+                <textarea rows={3} value={subject} onChange={e => { setSubject(e.target.value); setCreatePrompt(rebuildPrompt({subject: e.target.value, angle, environment, mood, cameraBody, focalLength, lensType, filmStock, aspectRatio, photographerStyle, movieLook, filterEffect})); }} placeholder="לדוגמה: אישה בגשם בתחנת אוטובוס בלונדון" dir="rtl" className="w-full bg-zinc-800 text-zinc-100 text-sm rounded-lg px-3 py-2 border border-zinc-700 focus:border-yellow-500 focus:outline-none resize-none" />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-xs text-zinc-500">זווית צילום</label>
+                  <select value={angle} onChange={e => { setAngle(e.target.value); setCreatePrompt(rebuildPrompt({subject, angle: e.target.value, environment, mood, cameraBody, focalLength, lensType, filmStock, aspectRatio, photographerStyle, movieLook, filterEffect})); }} className="w-full bg-zinc-800 text-zinc-100 text-sm rounded-lg px-3 py-2 border border-zinc-700 focus:border-yellow-500 focus:outline-none">
+                    <option value="">בחר...</option>
+                    <option>Eye level</option><option>Low angle</option><option>High angle</option>
+                    <option>Bird&apos;s eye view</option><option>Dutch angle</option><option>Over the shoulder</option>
+                    <option>Close-up</option><option>Extreme close-up</option><option>Wide shot</option>
+                    <option>Medium shot</option><option>Full body</option>
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs text-zinc-500">סביבה</label>
+                  <input type="text" value={environment} onChange={e => { setEnvironment(e.target.value); setCreatePrompt(rebuildPrompt({subject, angle, environment: e.target.value, mood, cameraBody, focalLength, lensType, filmStock, aspectRatio, photographerStyle, movieLook, filterEffect})); }} placeholder="רחוב, סטודיו, יער..." dir="rtl" className="w-full bg-zinc-800 text-zinc-100 text-sm rounded-lg px-3 py-2 border border-zinc-700 focus:border-yellow-500 focus:outline-none h-10" />
+                </div>
+              </div>
+            </div>
+
+            {/* Section 2 — Lighting */}
+            <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-4">
+              <h3 className="text-sm font-bold text-yellow-300 uppercase tracking-widest">02. תאורה ואווירה</h3>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-xs text-zinc-500">מקור תאורה</label>
+                  <select value={mood} onChange={e => { setMood(e.target.value); setCreatePrompt(rebuildPrompt({subject, angle, environment, mood: e.target.value, cameraBody, focalLength, lensType, filmStock, aspectRatio, photographerStyle, movieLook, filterEffect})); }} className="w-full bg-zinc-800 text-zinc-100 text-sm rounded-lg px-3 py-2 border border-zinc-700 focus:border-yellow-500 focus:outline-none">
+                    <option value="">בחר...</option>
+                    <option>Golden hour sunlight</option><option>Blue hour</option><option>Overcast soft light</option>
+                    <option>Neon lights</option><option>Candlelight</option><option>Studio softbox</option>
+                    <option>Hard rim lighting</option><option>Chiaroscuro</option><option>Practical lights only</option>
+                    <option>Moonlight</option><option>Harsh midday sun</option>
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs text-zinc-500">אווירה</label>
+                  <input type="text" value={mood} onChange={e => { setMood(e.target.value); setCreatePrompt(rebuildPrompt({subject, angle, environment, mood: e.target.value, cameraBody, focalLength, lensType, filmStock, aspectRatio, photographerStyle, movieLook, filterEffect})); }} placeholder="moody, cinematic, dreamy..." className="w-full bg-zinc-800 text-zinc-100 text-sm rounded-lg px-3 py-2 border border-zinc-700 focus:border-yellow-500 focus:outline-none h-10" />
+                </div>
+              </div>
+            </div>
+
+            {/* Section 3 — Camera */}
+            <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-4">
+              <h3 className="text-sm font-bold text-yellow-300 uppercase tracking-widest">03. ציוד צילום</h3>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-xs text-zinc-500">גוף מצלמה</label>
+                  <select value={cameraBody} onChange={e => { setCameraBody(e.target.value); setCreatePrompt(rebuildPrompt({subject, angle, environment, mood, cameraBody: e.target.value, focalLength, lensType, filmStock, aspectRatio, photographerStyle, movieLook, filterEffect})); }} className="w-full bg-zinc-800 text-zinc-100 text-sm rounded-lg px-3 py-2 border border-zinc-700 focus:border-yellow-500 focus:outline-none">
+                    <option value="">בחר...</option>
+                    <option>Canon EOS 5D Mark IV</option><option>Nikon Z9</option><option>Sony A7R V</option>
+                    <option>Hasselblad X2D</option><option>Leica M11</option><option>Fujifilm GFX 100S</option>
+                    <option>Phase One IQ4</option><option>Canon R5</option><option>Nikon D850</option>
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs text-zinc-500">מרחק מוקד</label>
+                  <select value={focalLength} onChange={e => { setFocalLength(e.target.value); setCreatePrompt(rebuildPrompt({subject, angle, environment, mood, cameraBody, focalLength: e.target.value, lensType, filmStock, aspectRatio, photographerStyle, movieLook, filterEffect})); }} className="w-full bg-zinc-800 text-zinc-100 text-sm rounded-lg px-3 py-2 border border-zinc-700 focus:border-yellow-500 focus:outline-none">
+                    <option value="">בחר...</option>
+                    <option>14mm</option><option>24mm</option><option>35mm</option><option>50mm</option>
+                    <option>85mm</option><option>100mm</option><option>135mm</option><option>200mm</option>
+                    <option>400mm</option>
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs text-zinc-500">סוג עדשה</label>
+                  <select value={lensType} onChange={e => { setLensType(e.target.value); setCreatePrompt(rebuildPrompt({subject, angle, environment, mood, cameraBody, focalLength, lensType: e.target.value, filmStock, aspectRatio, photographerStyle, movieLook, filterEffect})); }} className="w-full bg-zinc-800 text-zinc-100 text-sm rounded-lg px-3 py-2 border border-zinc-700 focus:border-yellow-500 focus:outline-none">
+                    <option value="">בחר...</option>
+                    <option>Prime lens</option><option>Zoom lens</option><option>Fisheye</option>
+                    <option>Macro</option><option>Tilt-shift</option><option>Anamorphic</option>
+                    <option>Portrait lens</option>
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs text-zinc-500">פילם / סנסור</label>
+                  <select value={filmStock} onChange={e => { setFilmStock(e.target.value); setCreatePrompt(rebuildPrompt({subject, angle, environment, mood, cameraBody, focalLength, lensType, filmStock: e.target.value, aspectRatio, photographerStyle, movieLook, filterEffect})); }} className="w-full bg-zinc-800 text-zinc-100 text-sm rounded-lg px-3 py-2 border border-zinc-700 focus:border-yellow-500 focus:outline-none">
+                    <option value="">בחר...</option>
+                    <option>Kodak Portra 400</option><option>Kodak Ektar 100</option><option>Fuji Velvia 50</option>
+                    <option>Ilford HP5</option><option>Kodak Tri-X 400</option><option>CineStill 800T</option>
+                    <option>Fuji Provia 100F</option><option>Lomochrome Purple</option>
+                  </select>
+                </div>
+                <div className="space-y-1 col-span-2">
+                  <label className="text-xs text-zinc-500">יחס תמונה</label>
+                  <select value={aspectRatio} onChange={e => { setAspectRatio(e.target.value); setCreatePrompt(rebuildPrompt({subject, angle, environment, mood, cameraBody, focalLength, lensType, filmStock, aspectRatio: e.target.value, photographerStyle, movieLook, filterEffect})); }} className="w-full bg-zinc-800 text-zinc-100 text-sm rounded-lg px-3 py-2 border border-zinc-700 focus:border-yellow-500 focus:outline-none">
+                    <option>16:9</option><option>4:3</option><option>1:1</option><option>9:16</option>
+                    <option>2.39:1 (Cinemascope)</option><option>2.35:1</option><option>1.85:1</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {/* Section 4 — Style */}
+            <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-4">
+              <h3 className="text-sm font-bold text-yellow-300 uppercase tracking-widest">04. סגנון ואסתטיקה</h3>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-xs text-zinc-500">סגנון צלם</label>
+                  <select value={photographerStyle} onChange={e => { setPhotographerStyle(e.target.value); setCreatePrompt(rebuildPrompt({subject, angle, environment, mood, cameraBody, focalLength, lensType, filmStock, aspectRatio, photographerStyle: e.target.value, movieLook, filterEffect})); }} className="w-full bg-zinc-800 text-zinc-100 text-sm rounded-lg px-3 py-2 border border-zinc-700 focus:border-yellow-500 focus:outline-none">
+                    <option value="">בחר...</option>
+                    <option>Annie Leibovitz</option><option>Ansel Adams</option><option>Henri Cartier-Bresson</option>
+                    <option>Steve McCurry</option><option>Helmut Newton</option><option>Richard Avedon</option>
+                    <option>Cindy Sherman</option><option>Gregory Crewdson</option><option>Martin Schoeller</option>
+                    <option>David LaChapelle</option>
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs text-zinc-500">סגנון סרט</label>
+                  <select value={movieLook} onChange={e => { setMovieLook(e.target.value); setCreatePrompt(rebuildPrompt({subject, angle, environment, mood, cameraBody, focalLength, lensType, filmStock, aspectRatio, photographerStyle, movieLook: e.target.value, filterEffect})); }} className="w-full bg-zinc-800 text-zinc-100 text-sm rounded-lg px-3 py-2 border border-zinc-700 focus:border-yellow-500 focus:outline-none">
+                    <option value="">בחר...</option>
+                    <option>Blade Runner 2049</option><option>The Grand Budapest Hotel</option>
+                    <option>Parasite</option><option>Mad Max: Fury Road</option><option>Her</option>
+                    <option>Interstellar</option><option>La La Land</option><option>No Country for Old Men</option>
+                    <option>Drive</option><option>Amélie</option>
+                  </select>
+                </div>
+                <div className="space-y-1 col-span-2">
+                  <label className="text-xs text-zinc-500">פילטר / אפקט</label>
+                  <select value={filterEffect} onChange={e => { setFilterEffect(e.target.value); setCreatePrompt(rebuildPrompt({subject, angle, environment, mood, cameraBody, focalLength, lensType, filmStock, aspectRatio, photographerStyle, movieLook, filterEffect: e.target.value})); }} className="w-full bg-zinc-800 text-zinc-100 text-sm rounded-lg px-3 py-2 border border-zinc-700 focus:border-yellow-500 focus:outline-none">
+                    <option value="">בחר...</option>
+                    <option>Film grain</option><option>Light leak</option><option>Lens flare</option>
+                    <option>Bokeh background</option><option>Motion blur</option><option>Double exposure</option>
+                    <option>Infrared</option><option>Cross-process</option><option>Vignette</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {/* Section 5 — Reference images */}
+            <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-4">
+              <h3 className="text-sm font-bold text-yellow-300 uppercase tracking-widest">05. תמונות רפרנס</h3>
+              <div className="grid grid-cols-2 gap-4">
+                {/* Face ref */}
+                <div className="space-y-2">
+                  <label className="text-xs text-zinc-500">פנים של הדמות</label>
+                  <div onClick={() => document.getElementById("ref-face")?.click()} className={`cursor-pointer rounded-xl border-2 border-dashed border-zinc-700 hover:border-yellow-500 transition-all flex items-center justify-center overflow-hidden ${faceRef ? "p-0 h-32" : "p-6"}`}>
+                    {faceRef ? <img src={faceRef} className="w-full h-full object-cover rounded-xl" alt="face ref" /> : <div className="text-center"><div className="text-2xl">👤</div><p className="text-xs text-zinc-600 mt-1">העלה תמונה</p></div>}
+                  </div>
+                  <input id="ref-face" type="file" accept="image/*" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) handleRefUpload(f, setFaceRef, setFaceBase64); }} />
+                  {faceRef && <button onClick={() => { setFaceRef(null); setFaceBase64(null); }} className="text-xs text-zinc-600 hover:text-rose-400 transition-colors">✕ הסר</button>}
+                </div>
+                {/* Outfit ref */}
+                <div className="space-y-2">
+                  <label className="text-xs text-zinc-500">בגדים של הדמות</label>
+                  <div onClick={() => document.getElementById("ref-outfit")?.click()} className={`cursor-pointer rounded-xl border-2 border-dashed border-zinc-700 hover:border-yellow-500 transition-all flex items-center justify-center overflow-hidden ${outfitRef ? "p-0 h-32" : "p-6"}`}>
+                    {outfitRef ? <img src={outfitRef} className="w-full h-full object-cover rounded-xl" alt="outfit ref" /> : <div className="text-center"><div className="text-2xl">👗</div><p className="text-xs text-zinc-600 mt-1">העלה תמונה</p></div>}
+                  </div>
+                  <input id="ref-outfit" type="file" accept="image/*" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) handleRefUpload(f, setOutfitRef, setOutfitBase64); }} />
+                  {outfitRef && <button onClick={() => { setOutfitRef(null); setOutfitBase64(null); }} className="text-xs text-zinc-600 hover:text-rose-400 transition-colors">✕ הסר</button>}
+                </div>
+              </div>
+              {/* Global ref */}
+              <div className="space-y-2">
+                <label className="text-xs text-zinc-500">רפרנס גלובלי לסגנון</label>
+                <div onClick={() => document.getElementById("ref-global")?.click()} className={`cursor-pointer rounded-xl border-2 border-dashed border-zinc-700 hover:border-yellow-500 transition-all flex items-center justify-center overflow-hidden ${globalRef ? "p-0 h-40" : "p-8"}`}>
+                  {globalRef ? <img src={globalRef} className="w-full h-full object-contain rounded-xl" alt="global ref" /> : <div className="text-center"><div className="text-2xl">🌐</div><p className="text-xs text-zinc-600 mt-1">תמונת סגנון כללי</p></div>}
+                </div>
+                <input id="ref-global" type="file" accept="image/*" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) handleRefUpload(f, setGlobalRef, setGlobalBase64); }} />
+                {globalRef && <button onClick={() => { setGlobalRef(null); setGlobalBase64(null); }} className="text-xs text-zinc-600 hover:text-rose-400 transition-colors">✕ הסר</button>}
+              </div>
+            </div>
+          </div>
+
+          {/* RIGHT — prompt preview + generate + result */}
+          <div className="space-y-6">
+            <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-4 sticky top-6">
+              <h3 className="text-sm font-bold text-yellow-300 uppercase tracking-widest">פרומפט מובנה</h3>
+              <textarea
+                value={createPrompt}
+                onChange={e => setCreatePrompt(e.target.value)}
+                rows={8}
+                dir="ltr"
+                className="w-full bg-zinc-800 text-zinc-200 text-sm font-mono rounded-lg px-4 py-3 border border-zinc-700 focus:border-yellow-500 focus:outline-none resize-y leading-relaxed"
+              />
+              <button
+                onClick={handleCreateImage}
+                disabled={!geminiKey || loadingCreate}
+                className="w-full py-4 bg-yellow-400 text-black text-base font-bold rounded-xl hover:bg-yellow-300 disabled:opacity-40 disabled:cursor-not-allowed transition-all focus:outline-none flex items-center justify-center gap-2"
+                type="button"
+              >
+                {loadingCreate ? <><span className="animate-spin inline-block w-5 h-5 border-2 border-black border-t-transparent rounded-full" />מייצר תמונה...</> : "✨ צור תמונה"}
+              </button>
+              {createError && <p className="text-xs text-rose-400 bg-rose-950 border border-rose-800 px-3 py-2 rounded-lg">{createError}</p>}
+              {createdImageUrl && (
+                <div className="space-y-3">
+                  <p className="text-xs text-emerald-400 font-semibold">✓ התמונה מוכנה!</p>
+                  <img src={createdImageUrl} alt="generated" className="w-full rounded-xl border border-zinc-700" />
+                  <div className="flex gap-2">
+                    <a href={createdImageUrl} download="nano-banana-create.png" className="flex-1 text-center py-2 border border-zinc-700 text-zinc-300 text-xs font-semibold rounded-lg hover:border-yellow-500 hover:text-yellow-300 transition-all">⬇ הורד</a>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (createdImageUrl) {
+                          fetch(createdImageUrl).then(r => r.blob()).then(blob => {
+                            const file = new File([blob], "created.png", { type: "image/png" });
+                            handleImageUpload(file);
+                            setActiveTab("edit");
+                          });
+                        }
+                      }}
+                      className="flex-1 text-center py-2 border border-yellow-600 text-yellow-300 text-xs font-semibold rounded-lg hover:bg-yellow-950 transition-all"
+                    >
+                      ✏️ שלח לעריכה
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── TAB 2: Edit ── */}
+      {activeTab === "edit" && (
       <main className="p-6 max-w-7xl mx-auto">
         <div className="grid grid-cols-1 gap-6">
           {/* ── COLUMN 1: Upload + Extract ── */}
@@ -768,6 +1104,7 @@ export default function Page() {
           </div>
         </div>
       </main>
+      )}
 
       {editorOpen && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
