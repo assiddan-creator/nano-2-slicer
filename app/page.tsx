@@ -1,6 +1,6 @@
 "use client";
 
-import { ChangeEvent, useState } from "react";
+import { useState } from "react";
 
 type JsonValue = string | number | boolean | null | JsonObject | JsonValue[];
 type JsonObject = { [key: string]: JsonValue };
@@ -97,31 +97,17 @@ function inferCategoryForKey(key: string): CategoryKey | null {
 
 export default function Home() {
   const [workflowData, setWorkflowData] = useState<JsonValue | null>(null);
-  const [sourceFileName, setSourceFileName] = useState("workflow.json");
+  const [jsonText, setJsonText] = useState<string>("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const handleFileUpload = async (event: ChangeEvent<HTMLInputElement>) => {
-    const selectedFile = event.target.files?.[0];
-    if (!selectedFile) {
-      return;
-    }
-
+  const parseJsonText = (text: string) => {
     setErrorMessage(null);
-
-    if (!selectedFile.name.toLowerCase().endsWith(".json")) {
-      setWorkflowData(null);
-      setErrorMessage("Only .json files are supported.");
-      return;
-    }
-
     try {
-      const fileText = await selectedFile.text();
-      const parsed = JSON.parse(fileText) as JsonValue;
+      const parsed = JSON.parse(text) as JsonValue;
       setWorkflowData(parsed);
-      setSourceFileName(selectedFile.name);
     } catch {
       setWorkflowData(null);
-      setErrorMessage("Invalid JSON file. Please upload a valid workflow file.");
+      setErrorMessage("Invalid JSON. Paste a valid workflow JSON, then press Load JSON.");
     }
   };
 
@@ -134,22 +120,37 @@ export default function Home() {
     });
   };
 
-  const downloadUpdatedJson = () => {
+  const [copyStatus, setCopyStatus] = useState<string | null>(null);
+
+  const copyUpdatedJsonToClipboard = async () => {
     if (workflowData === null) {
       return;
     }
 
-    const jsonString = JSON.stringify(workflowData, null, 2);
-    const blob = new Blob([jsonString], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const downloadAnchor = document.createElement("a");
-    downloadAnchor.href = url;
-    const baseName = sourceFileName.toLowerCase().endsWith(".json")
-      ? sourceFileName.slice(0, -5)
-      : sourceFileName;
-    downloadAnchor.download = `${baseName || "workflow"}.updated.json`;
-    downloadAnchor.click();
-    URL.revokeObjectURL(url);
+    const updatedText = JSON.stringify(workflowData, null, 2);
+    try {
+      await navigator.clipboard.writeText(updatedText);
+      setCopyStatus("Copied!");
+      window.setTimeout(() => setCopyStatus(null), 1500);
+    } catch {
+      // Fallback for environments where the Clipboard API is blocked.
+      try {
+        const textarea = document.createElement("textarea");
+        textarea.value = updatedText;
+        textarea.setAttribute("readonly", "true");
+        textarea.style.position = "absolute";
+        textarea.style.left = "-9999px";
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand("copy");
+        document.body.removeChild(textarea);
+        setCopyStatus("Copied!");
+        window.setTimeout(() => setCopyStatus(null), 1500);
+      } catch {
+        setCopyStatus("Copy failed");
+        window.setTimeout(() => setCopyStatus(null), 2000);
+      }
+    }
   };
 
   const renderEditor = (
@@ -333,39 +334,67 @@ export default function Home() {
         <header className="grid gap-2">
           <h1 className="text-3xl font-bold text-zinc-900">Nano Banana 2 Visual JSON Editor</h1>
           <p className="text-zinc-600">
-            Upload a workflow JSON file, edit values in a form view, then download the updated file.
+            Paste your workflow JSON, edit values in a form view, then copy the updated JSON.
           </p>
         </header>
 
         <section className="grid gap-4 rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
-          <label className="grid gap-2">
-            <span className="text-sm font-semibold text-zinc-700">Upload workflow file (.json)</span>
-            <input
-              type="file"
-              accept=".json,application/json"
-              onChange={handleFileUpload}
-              className="w-full rounded-md border border-zinc-300 px-3 py-2 text-zinc-900 file:mr-4 file:rounded-md file:border-0 file:bg-indigo-600 file:px-4 file:py-2 file:text-white hover:file:bg-indigo-500"
+          <div className="grid gap-2">
+            <label htmlFor="workflowJsonInput" className="text-sm font-semibold text-zinc-700">
+              Paste workflow JSON
+            </label>
+            <textarea
+              id="workflowJsonInput"
+              value={jsonText}
+              onChange={(e) => setJsonText(e.target.value)}
+              onPaste={(e) => {
+                const pasted = e.clipboardData?.getData("text") ?? "";
+                if (!pasted.trim()) return;
+                // Keyboard-only UX: parse immediately after paste.
+                setJsonText(pasted);
+                parseJsonText(pasted);
+              }}
+              rows={14}
+              className="w-full resize-y rounded-md border border-zinc-300 bg-white px-3 py-2 text-zinc-900 shadow-sm outline-none ring-indigo-500 focus:ring-2"
+              spellCheck={false}
             />
-          </label>
-
-          {errorMessage && (
-            <div className="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700">
-              {errorMessage}
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-300"
+                onClick={() => parseJsonText(jsonText)}
+              >
+                Load JSON
+              </button>
+              {errorMessage && (
+                <div
+                  className="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700"
+                  role="alert"
+                >
+                  {errorMessage}
+                </div>
+              )}
             </div>
-          )}
+          </div>
+
         </section>
 
         {workflowData !== null && (
           <>
             {renderCategorizedSections()}
 
-            <button
-              type="button"
-              onClick={downloadUpdatedJson}
-              className="rounded-lg bg-indigo-600 px-6 py-4 text-lg font-semibold text-white shadow-sm transition hover:bg-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-300"
-            >
-              Download Updated JSON
-            </button>
+            <div className="grid gap-3">
+              <button
+                type="button"
+                onClick={copyUpdatedJsonToClipboard}
+                className="rounded-lg bg-indigo-600 px-6 py-4 text-lg font-semibold text-white shadow-sm transition hover:bg-indigo-500 focus:outline-none focus:ring-4 focus:ring-indigo-300"
+              >
+                Copy to Clipboard
+              </button>
+              <div aria-live="polite" className="min-h-[1.25rem] text-sm text-zinc-600">
+                {copyStatus ? copyStatus : "\u00A0"}
+              </div>
+            </div>
           </>
         )}
       </div>
