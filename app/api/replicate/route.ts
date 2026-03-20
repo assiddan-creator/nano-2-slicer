@@ -33,12 +33,13 @@ export async function POST(req: NextRequest) {
   });
 
   const prediction = await startRes.json();
-
-  if (prediction.error) {
-    return NextResponse.json({ error: prediction.error }, { status: 500 });
-  }
-
-  return NextResponse.json({ id: prediction.id, status: prediction.status });
+  return NextResponse.json({
+    debug_status: startRes.status,
+    debug_full_response: prediction,
+    id: prediction.id,
+    status: prediction.status,
+    error: prediction.error || null,
+  });
 }
 
 export async function GET(req: NextRequest) {
