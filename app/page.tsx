@@ -255,7 +255,7 @@ function FieldEditor({
     typeof value === "string" && /^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$/.test(value as string);
 
   return (
-    <div style={{ marginLeft: indent }} className="my-0.5 flex items-center gap-2 group">
+    <div style={{ marginLeft: indent }} className="my-1.5 flex items-center gap-2 group">
       <span className="w-4" />
       {keyLabel}
       <span className="text-zinc-600 text-xs">:</span>
@@ -299,9 +299,7 @@ function FieldEditor({
           type="text"
           defaultValue={strVal}
           onBlur={(e) => handlePrimitive(e.target.value)}
-          className="flex-1 bg-zinc-800 text-zinc-100 text-xs font-mono rounded
-                     px-2 py-1 border border-zinc-700 focus:border-yellow-400
-                     focus:outline-none h-7"
+          className="flex-1 bg-zinc-900 text-zinc-100 text-sm font-mono rounded-lg px-3 py-2 border border-zinc-700 focus:border-yellow-400 focus:outline-none h-9"
           dir="auto"
         />
       )}
@@ -478,6 +476,7 @@ export default function Page() {
   const [generatedImageUrl, setGeneratedImageUrl] = useState<string | null>(null);
   const [extractError, setExtractError] = useState<string | null>(null);
   const [generateError, setGenerateError] = useState<string | null>(null);
+  const [changeInstructions, setChangeInstructions] = useState<string>("");
 
   const handleParse = useCallback(() => {
     const { data: parsed, error } = sanitizeAndParse(raw);
@@ -650,7 +649,7 @@ export default function Page() {
               {
                 parts: [
                   {
-                    text: `Modify this image based on the following JSON. Change ONLY what is specified in the JSON values that differ from the original. Keep everything else 100% identical — same camera angle, same perspective, same lighting direction, same shadows, same room layout, same proportions.\n\nJSON:\n${jsonString}`,
+                    text: `You are an expert image editor. Modify this image according to the instructions below.\n\nUSER INSTRUCTIONS (highest priority):\n${changeInstructions || "Apply the changes described in the JSON below"}\n\nJSON REFERENCE (base structure of the image):\n${jsonString}\n\nIMPORTANT RULES:\n- Follow the user instructions precisely\n- Keep everything NOT mentioned completely identical\n- Same camera angle, same perspective, same lighting, same composition\n- Do not add or remove objects unless explicitly asked`,
                   },
                   { inline_data: { mime_type: imageFile!.type, data: imageBase64 } },
                 ],
@@ -913,7 +912,7 @@ export default function Page() {
                 </div>
 
                 {view === "form" && (
-                  <div className="bg-zinc-800 rounded-xl px-3 py-3 max-h-96 overflow-y-auto">
+                  <div className="bg-zinc-800 rounded-xl px-4 py-4 max-h-[500px] overflow-y-auto space-y-1">
                     {Array.isArray(data) ? (
                       (data as JsonArray).map((item, i) => (
                         <FieldEditor
@@ -973,6 +972,19 @@ export default function Page() {
                 />
               </div>
             )}
+
+            <div className="space-y-1">
+              <label className="text-xs text-zinc-500">מה לשנות בתמונה? (כתוב בחופשיות)</label>
+              <textarea
+                value={changeInstructions}
+                onChange={e => setChangeInstructions(e.target.value)}
+                placeholder={"לדוגמה: שנה את צבע הספה לכחול כהה, הוסף שטיח פרסי, שנה את התאורה לערבית חמה"}
+                rows={3}
+                dir="rtl"
+                className="w-full bg-zinc-800 text-zinc-100 text-sm rounded-lg px-3 py-2 border border-zinc-700 focus:border-yellow-500 focus:outline-none resize-none placeholder-zinc-600"
+              />
+              <p className="text-xs text-zinc-600">הג&apos;ייסון ישמש כבסיס — ההוראות שלך יגברו עליו</p>
+            </div>
 
             <button
               onClick={handleGenerateImage}
