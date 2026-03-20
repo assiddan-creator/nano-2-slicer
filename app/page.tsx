@@ -1,3 +1,4 @@
+/*
 "use client";
 
 import { useState } from "react";
@@ -36,7 +37,585 @@ const CATEGORY_DEFINITIONS: {
 function isJsonObject(value: JsonValue): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
+*/
 
+"use client";
+
+import { useState, useCallback, useRef } from "react";
+
+// ─── Robust JSON Parser ───────────────────────────────────────────────────────
+
+function sanitizeAndParse(raw: string): { data: unknown; error: string | null } {
+  try {
+    // Step 1: Strip ALL invisible / directional / zero-width characters
+    const stripped = raw
+      .replace(/[\u200B-\u200D\uFEFF\u200E\u200F\u2028\u2029\u00AD\u180E\u2060\uFFF9-\uFFFB]/g, "")
+      .replace(/\u00A0/g, " ") // non-breaking space → regular space
+      .replace(/\u202A-\u202E/g, "") // LTR/RTL embedding & override marks
+      .replace(/\r\n/g, "\n")
+      .trim();
+
+    // Step 2: Find the outermost valid JSON container
+    const firstBrace = stripped.indexOf("{");
+    const firstBrack = stripped.indexOf("[");
+    const lastBrace = stripped.lastIndexOf("}");
+    const lastBrack = stripped.lastIndexOf("]");
+
+    let start = -1;
+    let end = -1;
+    let openChar = "";
+    let closeChar = "";
+
+    if (firstBrace !== -1 && (firstBrack === -1 || firstBrace < firstBrack)) {
+      start = firstBrace;
+      openChar = "{";
+      closeChar = "}";
+      end = lastBrace;
+    } else if (firstBrack !== -1) {
+      start = firstBrack;
+      openChar = "[";
+      closeChar = "]";
+      end = lastBrack;
+    }
+
+    if (start === -1 || end === -1 || end < start) {
+      return { data: null, error: "לא נמצא JSON תקני (סוגריים { } או [ ])" };
+    }
+
+    void openChar;
+    void closeChar; // used for detection only
+    const candidate = stripped.slice(start, end + 1);
+
+    const data = JSON.parse(candidate);
+    return { data, error: null };
+  } catch (e) {
+    return { data: null, error: (e as Error).message };
+  }
+}
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+type JsonPrimitive = string | number | boolean | null;
+type JsonValue = JsonPrimitive | JsonObject | JsonArray;
+interface JsonObject {
+  [key: string]: JsonValue;
+}
+type JsonArray = JsonValue[];
+
+// ─── Field Editor ─────────────────────────────────────────────────────────────
+
+interface FieldProps {
+  path: string[];
+  keyName: string;
+  value: JsonValue;
+  onChange: (path: string[], newVal: JsonValue) => void;
+  onDelete: (path: string[]) => void;
+  depth: number;
+}
+
+function FieldEditor({
+  path,
+  keyName,
+  value,
+  onChange,
+  onDelete,
+  depth,
+}: FieldProps) {
+  const [collapsed, setCollapsed] = useState(false);
+  const indent = depth * 16;
+
+  const handlePrimitive = (raw: string) => {
+    if (raw === "true") return onChange(path, true);
+    if (raw === "false") return onChange(path, false);
+    if (raw === "null") return onChange(path, null);
+    const num = Number(raw);
+    if (!isNaN(num) && raw.trim() !== "") return onChange(path, num);
+    onChange(path, raw);
+  };
+
+  const labelCls =
+    "text-xs font-mono font-semibold tracking-wide truncate max-w-[140px]";
+
+  const keyLabel = (
+    <span
+      className={`${labelCls} ${
+        depth === 0
+          ? "text-yellow-300"
+          : depth === 1
+            ? "text-emerald-300"
+            : "text-sky-300"
+      }`}
+    >
+      {keyName}
+    </span>
+  );
+
+  const deleteBtn = (
+    <button
+      onClick={() => onDelete(path)}
+      title="מחק שדה"
+      className="ml-1 opacity-0 group-hover:opacity-100 transition-opacity
+                 text-rose-400 hover:text-rose-200 text-xs font-bold leading-none
+                 focus:outline-none focus:opacity-100"
+      aria-label={`מחק ${keyName}`}
+    >
+      ✕
+    </button>
+  );
+
+  // ── Object ──
+  if (value !== null && typeof value === "object" && !Array.isArray(value)) {
+    const obj = value as JsonObject;
+    return (
+      <div style={{ marginLeft: indent }} className="my-1">
+        <div className="flex items-center gap-1 group">
+          <button
+            onClick={() => setCollapsed((c) => !c)}
+            className="text-zinc-400 hover:text-white focus:outline-none text-xs w-4 text-center"
+            aria-expanded={!collapsed}
+          >
+            {collapsed ? "▶" : "▼"}
+          </button>
+          {keyLabel}
+          <span className="text-zinc-500 text-xs ml-1">
+            {"{"}
+            {Object.keys(obj).length}
+            {"}"}
+          </span>
+          {deleteBtn}
+        </div>
+        {!collapsed && (
+          <div className="border-l border-zinc-700 ml-2 pl-2 mt-1">
+            {Object.entries(obj).map(([k, v]) => (
+              <FieldEditor
+                key={k}
+                path={[...path, k]}
+                keyName={k}
+                value={v}
+                onChange={onChange}
+                onDelete={onDelete}
+                depth={depth + 1}
+              />
+            ))}
+            <AddFieldRow path={path} value={obj} onChange={onChange} />
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // ── Array ──
+  if (Array.isArray(value)) {
+    return (
+      <div style={{ marginLeft: indent }} className="my-1">
+        <div className="flex items-center gap-1 group">
+          <button
+            onClick={() => setCollapsed((c) => !c)}
+            className="text-zinc-400 hover:text-white focus:outline-none text-xs w-4 text-center"
+            aria-expanded={!collapsed}
+          >
+            {collapsed ? "▶" : "▼"}
+          </button>
+          {keyLabel}
+          <span className="text-zinc-500 text-xs ml-1">[{value.length}]</span>
+          {deleteBtn}
+        </div>
+        {!collapsed && (
+          <div className="border-l border-zinc-700 ml-2 pl-2 mt-1">
+            {value.map((item, i) => (
+              <FieldEditor
+                key={i}
+                path={[...path, String(i)]}
+                keyName={String(i)}
+                value={item}
+                onChange={onChange}
+                onDelete={onDelete}
+                depth={depth + 1}
+              />
+            ))}
+            <button
+              onClick={() => {
+                const newArr = [...value, ""];
+                onChange(path, newArr);
+              }}
+              className="mt-1 text-xs text-zinc-400 hover:text-yellow-300
+                         focus:outline-none focus:text-yellow-300 transition-colors"
+            >
+              + הוסף פריט
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // ── Primitive ──
+  const strVal = value === null ? "null" : String(value);
+  const isLong = typeof value === "string" && value.length > 60;
+
+  return (
+    <div style={{ marginLeft: indent }} className="my-0.5 flex items-center gap-2 group">
+      <span className="w-4" />
+      {keyLabel}
+      <span className="text-zinc-600 text-xs">:</span>
+      {isLong ? (
+        <textarea
+          defaultValue={strVal}
+          onBlur={(e) => handlePrimitive(e.target.value)}
+          rows={2}
+          className="flex-1 bg-zinc-800 text-zinc-100 text-xs font-mono rounded
+                     px-2 py-1 border border-zinc-700 focus:border-yellow-400
+                     focus:outline-none resize-y min-h-[40px]"
+          dir="auto"
+        />
+      ) : (
+        <input
+          type="text"
+          defaultValue={strVal}
+          onBlur={(e) => handlePrimitive(e.target.value)}
+          className="flex-1 bg-zinc-800 text-zinc-100 text-xs font-mono rounded
+                     px-2 py-1 border border-zinc-700 focus:border-yellow-400
+                     focus:outline-none h-7"
+          dir="auto"
+        />
+      )}
+      {typeof value === "boolean" && (
+        <button
+          onClick={() => onChange(path, !value)}
+          className={`text-xs px-2 py-0.5 rounded font-mono font-bold border
+            transition-colors focus:outline-none
+            ${
+              value
+                ? "border-emerald-500 text-emerald-300 hover:bg-emerald-900"
+                : "border-zinc-600 text-zinc-400 hover:bg-zinc-700"
+            }`}
+        >
+          {value ? "true" : "false"}
+        </button>
+      )}
+      {deleteBtn}
+    </div>
+  );
+}
+
+// ─── Add Field Row ─────────────────────────────────────────────────────────────
+
+function AddFieldRow({
+  path,
+  value,
+  onChange,
+}: {
+  path: string[];
+  value: JsonObject;
+  onChange: (path: string[], newVal: JsonValue) => void;
+}) {
+  const [adding, setAdding] = useState(false);
+  const [newKey, setNewKey] = useState("");
+  const [newVal, setNewVal] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const commit = () => {
+    const k = newKey.trim();
+    if (!k) return;
+    let parsed: JsonValue = newVal;
+    if (newVal === "true") parsed = true;
+    else if (newVal === "false") parsed = false;
+    else if (newVal === "null") parsed = null;
+    else if (!isNaN(Number(newVal)) && newVal.trim() !== "") parsed = Number(newVal);
+    onChange(path, { ...value, [k]: parsed });
+    setNewKey("");
+    setNewVal("");
+    setAdding(false);
+  };
+
+  if (!adding) {
+    return (
+      <button
+        onClick={() => {
+          setAdding(true);
+          setTimeout(() => inputRef.current?.focus(), 50);
+        }}
+        className="mt-1 text-xs text-zinc-500 hover:text-yellow-300
+                   focus:outline-none focus:text-yellow-300 transition-colors"
+      >
+        + הוסף שדה
+      </button>
+    );
+  }
+
+  return (
+    <div className="mt-1 flex items-center gap-1 flex-wrap">
+      <input
+        ref={inputRef}
+        value={newKey}
+        onChange={(e) => setNewKey(e.target.value)}
+        placeholder="מפתח"
+        className="bg-zinc-800 text-zinc-100 text-xs font-mono rounded
+                   px-2 py-1 border border-yellow-600 focus:outline-none w-28 h-7"
+        dir="ltr"
+        onKeyDown={(e) => e.key === "Enter" && commit()}
+      />
+      <span className="text-zinc-500 text-xs">:</span>
+      <input
+        value={newVal}
+        onChange={(e) => setNewVal(e.target.value)}
+        placeholder="ערך"
+        className="bg-zinc-800 text-zinc-100 text-xs font-mono rounded
+                   px-2 py-1 border border-yellow-600 focus:outline-none w-32 h-7"
+        dir="auto"
+        onKeyDown={(e) => e.key === "Enter" && commit()}
+      />
+      <button
+        onClick={commit}
+        className="text-xs px-2 py-1 bg-yellow-500 text-black font-bold rounded
+                   hover:bg-yellow-400 focus:outline-none"
+      >
+        ✓
+      </button>
+      <button
+        onClick={() => setAdding(false)}
+        className="text-xs px-2 py-1 text-zinc-500 hover:text-zinc-200
+                   focus:outline-none"
+      >
+        ביטול
+      </button>
+    </div>
+  );
+}
+
+// ─── Deep helpers ─────────────────────────────────────────────────────────────
+
+function deepSet(obj: JsonValue, path: string[], newVal: JsonValue): JsonValue {
+  if (path.length === 0) return newVal;
+  const [head, ...rest] = path;
+  if (Array.isArray(obj)) {
+    const idx = Number(head);
+    const copy = [...obj];
+    copy[idx] = deepSet(copy[idx], rest, newVal);
+    return copy;
+  }
+  if (obj !== null && typeof obj === "object") {
+    return { ...(obj as JsonObject), [head]: deepSet((obj as JsonObject)[head], rest, newVal) };
+  }
+  return obj;
+}
+
+function deepDelete(obj: JsonValue, path: string[]): JsonValue {
+  if (path.length === 0) return obj;
+  const [head, ...rest] = path;
+  if (Array.isArray(obj)) {
+    const idx = Number(head);
+    if (rest.length === 0) return obj.filter((_, i) => i !== idx);
+    const copy = [...obj];
+    copy[idx] = deepDelete(copy[idx], rest);
+    return copy;
+  }
+  if (obj !== null && typeof obj === "object") {
+    if (rest.length === 0) {
+      const copy = { ...(obj as JsonObject) };
+      delete copy[head];
+      return copy;
+    }
+    return { ...(obj as JsonObject), [head]: deepDelete((obj as JsonObject)[head], rest) };
+  }
+  return obj;
+}
+
+// ─── Main Page ────────────────────────────────────────────────────────────────
+
+export default function Page() {
+  const [raw, setRaw] = useState("");
+  const [data, setData] = useState<JsonValue>(null);
+  const [parseError, setParseError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [view, setView] = useState<"form" | "raw">("form");
+
+  const handleParse = useCallback(() => {
+    const { data: parsed, error } = sanitizeAndParse(raw);
+    if (error) {
+      setParseError(error);
+      setData(null);
+    } else {
+      setParseError(null);
+      setData(parsed as JsonValue);
+    }
+  }, [raw]);
+
+  const handleChange = useCallback((path: string[], newVal: JsonValue) => {
+    setData((prev) => deepSet(prev, path, newVal));
+  }, []);
+
+  const handleDelete = useCallback((path: string[]) => {
+    setData((prev) => deepDelete(prev, path));
+  }, []);
+
+  const handleCopy = useCallback(async () => {
+    if (data === null) return;
+    const text = JSON.stringify(data, null, 2);
+    await navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }, [data]);
+
+  const hasData = data !== null;
+
+  return (
+    <div className="min-h-screen bg-zinc-950 text-zinc-100 font-mono">
+      {/* ── Header ── */}
+      <header className="border-b border-zinc-800 px-6 py-4 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <span className="text-2xl">🍌</span>
+          <div>
+            <h1 className="text-base font-bold text-yellow-300 tracking-tight leading-none">
+              Nano Banana 2
+            </h1>
+            <p className="text-xs text-zinc-500 mt-0.5">Visual JSON Editor</p>
+          </div>
+        </div>
+        <div className="text-xs text-zinc-600">עברית-בטוח · ניקוי תווים בלתי נראים</div>
+      </header>
+
+      <main className="p-6 max-w-5xl mx-auto space-y-6">
+        {/* ── Input Area ── */}
+        <section className="space-y-2">
+          <label className="text-xs text-zinc-400 uppercase tracking-widest">הדבק JSON כאן</label>
+          <textarea
+            value={raw}
+            onChange={(e) => setRaw(e.target.value)}
+            placeholder={'{\n  "key": "value"\n}'}
+            rows={7}
+            dir="ltr"
+            spellCheck={false}
+            className="w-full bg-zinc-900 text-zinc-100 text-sm font-mono rounded-lg
+                       px-4 py-3 border border-zinc-700 focus:border-yellow-500
+                       focus:outline-none resize-y leading-relaxed placeholder-zinc-700"
+          />
+          <div className="flex gap-3 items-center flex-wrap">
+            <button
+              onClick={handleParse}
+              className="px-4 py-2 bg-yellow-400 text-black text-sm font-bold rounded-lg
+                         hover:bg-yellow-300 active:bg-yellow-500 transition-colors
+                         focus:outline-none focus:ring-2 focus:ring-yellow-400 focus:ring-offset-2
+                         focus:ring-offset-zinc-950"
+            >
+              ⟳ פרסר JSON
+            </button>
+            {raw && (
+              <button
+                onClick={() => {
+                  setRaw("");
+                  setData(null);
+                  setParseError(null);
+                }}
+                className="px-3 py-2 text-xs text-zinc-500 hover:text-zinc-200
+                           border border-zinc-700 rounded-lg transition-colors focus:outline-none"
+              >
+                נקה
+              </button>
+            )}
+            {parseError && (
+              <span
+                className="text-xs text-rose-400 bg-rose-950 border border-rose-800
+                               px-3 py-1.5 rounded-lg max-w-md truncate"
+                title={parseError}
+              >
+                ⚠ {parseError}
+              </span>
+            )}
+          </div>
+        </section>
+
+        {/* ── Editor Area ── */}
+        {hasData && (
+          <section className="space-y-3">
+            {/* Toolbar */}
+            <div className="flex items-center justify-between flex-wrap gap-3">
+              <div className="flex bg-zinc-900 border border-zinc-700 rounded-lg p-0.5 gap-0.5">
+                <button
+                  onClick={() => setView("form")}
+                  className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors focus:outline-none
+                    ${view === "form" ? "bg-yellow-400 text-black" : "text-zinc-400 hover:text-zinc-100"}`}
+                >
+                  📋 טופס
+                </button>
+                <button
+                  onClick={() => setView("raw")}
+                  className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors focus:outline-none
+                    ${view === "raw" ? "bg-yellow-400 text-black" : "text-zinc-400 hover:text-zinc-100"}`}
+                >
+                  {"{ }"} JSON גולמי
+                </button>
+              </div>
+              <button
+                onClick={handleCopy}
+                className={`px-4 py-2 text-sm font-bold rounded-lg border transition-all
+                  focus:outline-none focus:ring-2 focus:ring-yellow-400 focus:ring-offset-2
+                  focus:ring-offset-zinc-950
+                  ${
+                    copied
+                      ? "border-emerald-500 text-emerald-300 bg-emerald-950"
+                      : "border-yellow-600 text-yellow-300 hover:bg-yellow-950"
+                  }`}
+              >
+                {copied ? "✓ הועתק!" : "⎘ העתק JSON"}
+              </button>
+            </div>
+
+            {/* Form view */}
+            {view === "form" && (
+              <div className="bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-4
+                              max-h-[60vh] overflow-y-auto">
+                {Array.isArray(data) ? (
+                  (data as JsonArray).map((item, i) => (
+                    <FieldEditor
+                      key={i}
+                      path={[String(i)]}
+                      keyName={String(i)}
+                      value={item}
+                      onChange={handleChange}
+                      onDelete={handleDelete}
+                      depth={0}
+                    />
+                  ))
+                ) : (
+                  Object.entries(data as JsonObject).map(([k, v]) => (
+                    <FieldEditor
+                      key={k}
+                      path={[k]}
+                      keyName={k}
+                      value={v}
+                      onChange={handleChange}
+                      onDelete={handleDelete}
+                      depth={0}
+                    />
+                  ))
+                )}
+              </div>
+            )}
+
+            {/* Raw view */}
+            {view === "raw" && (
+              <pre
+                className="bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-4
+                              text-xs text-zinc-300 overflow-auto max-h-[60vh] leading-relaxed"
+                dir="ltr"
+              >
+                {JSON.stringify(data, null, 2)}
+              </pre>
+            )}
+          </section>
+        )}
+      </main>
+
+      {/* ── Footer ── */}
+      <footer className="mt-12 pb-6 text-center text-xs text-zinc-700">
+        מנקה: U+200B–200D · FEFF · 200E/F · A0 · 202A–202E
+      </footer>
+    </div>
+  );
+}
+
+/*
 function formatKeyLabel(label: string): string {
   return label
     .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
@@ -493,3 +1072,5 @@ export default function Home() {
     </main>
   );
 }
+
+*/
