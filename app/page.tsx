@@ -249,6 +249,12 @@ export default function Page() {
   >("nano-banana-2");
   const [useReplicate, setUseReplicate] = useState(false);
 
+  // Step 3 (edit tab) engine selection. Default to Replicate.
+  const [editReplicateEngine, setEditReplicateEngine] = useState<
+    "flux-2-pro" | "seedream-5-lite" | "nano-banana-2"
+  >("nano-banana-2");
+  const [editUseReplicate, setEditUseReplicate] = useState(true);
+
   const [subject, setSubject] = useState("");
   const [angle, setAngle] = useState("");
   const [environment, setEnvironment] = useState("");
@@ -759,6 +765,119 @@ export default function Page() {
       } else {
         setGenerateError("ג'מיני לא החזיר תמונה — נסה שוב או החלף מודל.");
       }
+    } catch (e) {
+      setGenerateError((e as Error).message);
+    } finally {
+      setLoadingGenerate(false);
+    }
+  };
+
+  const handleGenerateImageReplicate = async () => {
+    if (!imageBase64 || !data) return;
+    setLoadingGenerate(true);
+    setGenerateError(null);
+    setGeneratedImageUrl(null);
+    try {
+      const jsonString = JSON.stringify(data, null, 2);
+      const promptText = `Edit the provided image according to these instructions:\n${changeInstructions || "Apply the changes described in the JSON below"}\n\nJSON REFERENCE:\n${jsonString}\n\nKeep everything not mentioned completely identical. Do not add or remove objects unless explicitly requested.`;
+
+      const referenceMimeType = imageFile?.type || "image/jpeg";
+      const referenceDataUri = `data:${referenceMimeType};base64,${imageBase64}`;
+
+      let input: Record<string, unknown> = { prompt: promptText };
+
+      if (editReplicateEngine === "flux-2-pro") {
+        input = {
+          prompt: promptText,
+          aspect_ratio: "16:9",
+          output_format: "jpg",
+          resolution: "1 MP",
+          safety_tolerance: 2,
+          input_images: [referenceDataUri],
+        };
+      } else if (editReplicateEngine === "seedream-5-lite") {
+        input = {
+          prompt: promptText,
+          size: "2K",
+          aspect_ratio: "16:9",
+          output_format: "jpeg",
+          sequential_image_generation: "disabled",
+          image_input: [referenceDataUri],
+        };
+      } else if (editReplicateEngine === "nano-banana-2") {
+        input = {
+          prompt: promptText,
+          aspect_ratio: "16:9",
+          resolution: "1K",
+          output_format: "jpg",
+          google_search: false,
+          image_search: false,
+          image_input: [referenceDataUri],
+        };
+      }
+
+      const startRes = await fetch("/api/replicate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          modelId: editReplicateEngine,
+          input,
+        }),
+      });
+
+      const startData = await startRes.json();
+      if (startData.error) {
+        setGenerateError(startData.error);
+        return;
+      }
+
+      const predictionId: string | undefined = startData.id;
+      if (!predictionId) {
+        setGenerateError("Missing prediction id");
+        return;
+      }
+
+      let attempts = 0;
+      while (attempts < 60) {
+        await new Promise((r) => setTimeout(r, 3000));
+        const pollRes = await fetch(
+          `/api/replicate?id=${encodeURIComponent(predictionId)}`,
+        );
+        const pollData = await pollRes.json();
+
+        if (pollData.status === "succeeded") {
+          const output = pollData.output;
+          let imageUrl = "";
+          if (typeof output === "string") {
+            imageUrl = output;
+          } else if (Array.isArray(output)) {
+            imageUrl = output[0] as string;
+          } else if (output && typeof output === "object") {
+            const vals = Object.values(
+              output as Record<string, unknown>,
+            );
+            imageUrl = vals[0] as string;
+          }
+
+          if (imageUrl) {
+            setGeneratedImageUrl(imageUrl);
+          } else {
+            setGenerateError(
+              "המודל לא החזיר תמונה — פלט: " + JSON.stringify(output),
+            );
+          }
+          return;
+        }
+
+        if (pollData.status === "failed" || pollData.status === "canceled") {
+          setGenerateError(pollData.error || "Prediction failed");
+          return;
+        }
+
+        attempts++;
+      }
+
+      setGenerateError("Timeout after 3 minutes");
     } catch (e) {
       setGenerateError((e as Error).message);
     } finally {
@@ -1369,9 +1488,56 @@ export default function Page() {
               <p className="text-xs text-zinc-600">הג&apos;ייסון ישמש כבסיס — ההוראות שלך יגברו עליו</p>
             </div>
 
+          {/* Engine selector (Step 3) */}
+          <div className="space-y-2">
+            <label className="text-xs text-zinc-500">מנוע יצירה</label>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={() => setEditUseReplicate(false)}
+                className={`py-2 px-3 text-xs font-bold rounded-lg border transition-all focus:outline-none ${!editUseReplicate ? "bg-yellow-400 text-black border-yellow-400" : "bg-zinc-800 text-zinc-400 border-zinc-700 hover:border-zinc-500"}`}
+                type="button"
+              >
+                🍌 Gemini
+              </button>
+              <button
+                onClick={() => setEditUseReplicate(true)}
+                className={`py-2 px-3 text-xs font-bold rounded-lg border transition-all focus:outline-none ${editUseReplicate ? "bg-yellow-400 text-black border-yellow-400" : "bg-zinc-800 text-zinc-400 border-zinc-700 hover:border-zinc-500"}`}
+                type="button"
+              >
+                ⚡ Replicate
+              </button>
+            </div>
+            {editUseReplicate && (
+              <select
+                value={editReplicateEngine}
+                onChange={(e) =>
+                  setEditReplicateEngine(
+                    e.target.value as "flux-2-pro" | "seedream-5-lite" | "nano-banana-2",
+                  )
+                }
+                className="w-full bg-zinc-800 text-zinc-100 text-sm rounded-lg px-3 py-2 border border-zinc-700 focus:border-yellow-500 focus:outline-none"
+              >
+                <option value="nano-banana-2">
+                  🍌 Nano Banana 2 (Google) — מהיר
+                </option>
+                <option value="flux-2-pro">
+                  ⚡ Flux 2 Pro (Black Forest) — איכות גבוהה
+                </option>
+                <option value="seedream-5-lite">
+                  🧠 Seedream 5 Lite (ByteDance) — הכי חכם
+                </option>
+              </select>
+            )}
+          </div>
+
             <button
-              onClick={handleGenerateImage}
-              disabled={!data || !imageBase64 || !geminiKey || loadingGenerate}
+              onClick={editUseReplicate ? handleGenerateImageReplicate : handleGenerateImage}
+              disabled={
+                !data ||
+                !imageBase64 ||
+                (!geminiKey && !editUseReplicate) ||
+                loadingGenerate
+              }
               className="w-full py-4 bg-yellow-400 text-black text-sm font-bold rounded-xl hover:bg-yellow-300 disabled:opacity-40 disabled:cursor-not-allowed transition-all focus:outline-none flex items-center justify-center gap-2"
               type="button"
             >
