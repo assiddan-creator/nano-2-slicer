@@ -45,28 +45,25 @@ async function getLatestVersionId(modelSlug: string) {
   if (!parsed) return null;
 
   const { owner, model } = parsed;
-  const versionsRes = await fetch(
+
+  // Some models do not expose a versions-list; instead, use `latest_version.id`
+  // from the model details endpoint.
+  const modelRes = await fetch(
     `https://api.replicate.com/v1/models/${encodeURIComponent(
       owner,
-    )}/${encodeURIComponent(model)}/versions?limit=1`,
+    )}/${encodeURIComponent(model)}`,
     {
       headers: { Authorization: `Bearer ${REPLICATE_API_TOKEN}` },
     },
   );
 
-  const versionsData = await versionsRes.json();
-  const results = Array.isArray(versionsData?.results)
-    ? versionsData.results
-    : Array.isArray(versionsData)
-      ? versionsData
-      : [];
-
-  const first = results[0];
+  const modelData = await modelRes.json();
   const versionId =
-    first?.id ??
-    first?.version ??
-    first?.latest_version ??
-    (typeof first === "string" ? first : null);
+    modelData?.latest_version?.id ??
+    modelData?.latest_version ??
+    (typeof modelData?.latest_version === "string"
+      ? modelData.latest_version
+      : null);
 
   if (typeof versionId !== "string" || !versionId) return null;
   versionIdCache.set(modelSlug, versionId);
