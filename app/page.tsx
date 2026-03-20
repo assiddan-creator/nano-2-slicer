@@ -41,7 +41,7 @@ function isJsonObject(value: JsonValue): value is JsonObject {
 
 "use client";
 
-import { useState, useCallback } from "react";
+import { useEffect, useState, useCallback } from "react";
 
 // ─── Robust JSON Parser ───────────────────────────────────────────────────────
 
@@ -207,6 +207,36 @@ export default function Page() {
   const [extractError, setExtractError] = useState<string | null>(null);
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [changeInstructions, setChangeInstructions] = useState<string>("");
+
+  // Temporary diagnostic ping to confirm Gemini connectivity/model availability.
+  // Runs once per page load when `geminiKey` is present.
+  const [geminiPingDone, setGeminiPingDone] = useState(false);
+
+  useEffect(() => {
+    if (!geminiKey || geminiPingDone) return;
+    setGeminiPingDone(true);
+    (async () => {
+      try {
+        const pingUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`;
+        const res = await fetch(pingUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: "ping" }] }],
+            generationConfig: { responseModalities: ["TEXT"] },
+          }),
+        });
+        const raw = await res.text();
+        if (!res.ok) {
+          console.error("Gemini ping failed:", res.status, raw);
+          return;
+        }
+        console.log("Gemini ping ok:", raw.slice(0, 500));
+      } catch (e) {
+        console.error("Gemini ping network error:", e);
+      }
+    })();
+  }, [geminiKey, geminiPingDone]);
 
   const [activeTab, setActiveTab] = useState<"create" | "edit">("create");
   const [createPrompt, setCreatePrompt] = useState<string>("A photorealistic image. No blurred faces. 16:9 format.");
@@ -613,18 +643,24 @@ export default function Page() {
       if (outfitBase64) parts.push({ inline_data: { mime_type: "image/jpeg", data: outfitBase64 } });
       if (globalBase64) parts.push({ inline_data: { mime_type: "image/jpeg", data: globalBase64 } });
 
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image-preview:generateContent?key=${geminiKey}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            contents: [{ parts }],
-            generationConfig: { responseModalities: ["TEXT", "IMAGE"] }
-          })
-        }
-      );
-      const result = await response.json();
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent?key=${geminiKey}`;
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ parts }],
+          generationConfig: { responseModalities: ["TEXT", "IMAGE"] },
+        }),
+      });
+      const raw = await response.text();
+      if (!response.ok) {
+        console.error("Gemini createImage failed:", response.status, raw);
+        setCreateError(
+          `Gemini createImage failed (${response.status}). ${raw}`,
+        );
+        return;
+      }
+      const result = JSON.parse(raw);
       const resParts = result?.candidates?.[0]?.content?.parts || [];
       const imagePart = resParts.find((p: { inlineData?: { mimeType: string; data: string } }) => p.inlineData?.mimeType?.startsWith("image/"));
       if (imagePart) {
@@ -646,27 +682,31 @@ export default function Page() {
     setGeneratedImageUrl(null);
     try {
       const jsonString = JSON.stringify(data, null, 2);
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image-preview:generateContent?key=${geminiKey}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            contents: [
-              {
-                parts: [
-                  {
-                    text: `You are an expert image editor. Modify this image according to the instructions below.\n\nUSER INSTRUCTIONS (highest priority):\n${changeInstructions || "Apply the changes described in the JSON below"}\n\nJSON REFERENCE (base structure of the image):\n${jsonString}\n\nIMPORTANT RULES:\n- Follow the user instructions precisely\n- Keep everything NOT mentioned completely identical\n- Same camera angle, same perspective, same lighting, same composition\n- Do not add or remove objects unless explicitly asked`,
-                  },
-                  { inline_data: { mime_type: imageFile!.type, data: imageBase64 } },
-                ],
-              },
-            ],
-            generationConfig: { responseModalities: ["TEXT", "IMAGE"] },
-          }),
-        },
-      );
-      const result = await response.json();
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent?key=${geminiKey}`;
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [
+            {
+              parts: [
+                {
+                  text: `You are an expert image editor. Modify this image according to the instructions below.\n\nUSER INSTRUCTIONS (highest priority):\n${changeInstructions || "Apply the changes described in the JSON below"}\n\nJSON REFERENCE (base structure of the image):\n${jsonString}\n\nIMPORTANT RULES:\n- Follow the user instructions precisely\n- Keep everything NOT mentioned completely identical\n- Same camera angle, same perspective, same lighting, same composition\n- Do not add or remove objects unless explicitly asked`,
+                },
+                { inline_data: { mime_type: imageFile!.type, data: imageBase64 } },
+              ],
+            },
+          ],
+          generationConfig: { responseModalities: ["TEXT", "IMAGE"] },
+        }),
+      });
+      const raw = await response.text();
+      if (!response.ok) {
+        console.error("Gemini generateImage failed:", response.status, raw);
+        setGenerateError(`Gemini generateImage failed (${response.status}). ${raw}`);
+        return;
+      }
+      const result = JSON.parse(raw);
       const parts = result?.candidates?.[0]?.content?.parts || [];
       const imagePart = parts.find(
         (p: { inlineData?: { mimeType: string; data: string } }) =>
