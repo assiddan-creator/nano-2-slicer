@@ -252,13 +252,40 @@ function FieldEditor({
   // ── Primitive ──
   const strVal = value === null ? "null" : String(value);
   const isLong = typeof value === "string" && value.length > 60;
+  const isColorHexString =
+    typeof value === "string" && /^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$/.test(value as string);
 
   return (
     <div style={{ marginLeft: indent }} className="my-0.5 flex items-center gap-2 group">
       <span className="w-4" />
       {keyLabel}
       <span className="text-zinc-600 text-xs">:</span>
-      {isLong ? (
+      {isColorHexString ? (
+        <div className="flex items-center gap-2 flex-1">
+          <div className="relative flex-shrink-0">
+            <input
+              type="color"
+              defaultValue={value as string}
+              onBlur={(e) => onChange(path, e.target.value)}
+              onChange={(e) => onChange(path, e.target.value)}
+              className="w-8 h-7 rounded cursor-pointer border border-zinc-600 bg-transparent p-0.5 focus:outline-none focus:border-yellow-400"
+              title="בחר צבע"
+            />
+          </div>
+          <input
+            type="text"
+            defaultValue={value as string}
+            onBlur={(e) => onChange(path, e.target.value)}
+            className="flex-1 bg-zinc-800 text-zinc-100 text-xs font-mono rounded px-2 py-1 border border-zinc-700 focus:border-yellow-400 focus:outline-none h-7"
+            dir="ltr"
+          />
+          <div
+            className="w-7 h-7 rounded border border-zinc-600 flex-shrink-0"
+            style={{ backgroundColor: value as string }}
+            title={value as string}
+          />
+        </div>
+      ) : isLong ? (
         <textarea
           defaultValue={strVal}
           onBlur={(e) => handlePrimitive(e.target.value)}
