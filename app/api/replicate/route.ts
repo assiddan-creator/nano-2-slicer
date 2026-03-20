@@ -7,6 +7,7 @@ const modelMap: Record<string, string> = {
   "flux-2-pro": "black-forest-labs/flux-2-pro",
   "seedream-5-lite": "bytedance/seedream-5-lite",
   "nano-banana-2": "google/nano-banana-2",
+  "gemini-2-5-flash": "google/gemini-2.5-flash",
 };
 
 const versionIdCache = new Map<string, string>();

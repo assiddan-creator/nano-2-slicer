@@ -374,46 +374,86 @@ export default function Page() {
   };
 
   const handleExtractJson = async () => {
-    if (!imageBase64 || !geminiKey) return;
+    if (!imageBase64) return;
     setLoadingExtract(true);
     setExtractError(null);
     try {
       const allPromptsFlat = [...editablePrompts.general, ...editablePrompts.apps];
       const selectedPrompt = allPromptsFlat[selectedPromptIndex];
+
+      // Replicate input schema for `google/gemini-2.5-flash`:
+      // - prompt: string
+      // - images: string[] (data URIs)
       const extractionPrompt =
         `${selectedPrompt.prompt}\n\nReturn ONLY a raw JSON object. Do not include any markdown, backticks, or conversational text.`;
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            contents: [
-              {
-                parts: [
-                  { text: extractionPrompt },
-                  { inline_data: { mime_type: imageFile!.type, data: imageBase64 } },
-                ],
-              },
-            ],
-            generationConfig: {
-              responseModalities: ["TEXT"],
-              responseMimeType: "application/json",
-            },
-          }),
-        },
-      );
-      const result = await response.json();
-      const text = result?.candidates?.[0]?.content?.parts?.[0]?.text || "";
-      setRaw(text);
-      const { data: parsed, error } = sanitizeAndParse(text);
-      if (error) {
-        console.error("Gemini extract raw text (unparsed):", text);
-        setExtractError(error);
-      } else {
-        setData(parsed as JsonValue);
-        setExtractError(null);
+
+      const mimeType = imageFile?.type || "image/jpeg";
+      const imageDataUri = `data:${mimeType};base64,${imageBase64}`;
+
+      const startRes = await fetch("/api/replicate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          modelId: "gemini-2-5-flash",
+          input: { prompt: extractionPrompt, images: [imageDataUri] },
+        }),
+      });
+
+      const startData = await startRes.json();
+      if (startData.error) {
+        setExtractError(startData.error);
+        return;
       }
+
+      const predictionId: string | undefined = startData.id;
+      if (!predictionId) {
+        setExtractError("Missing prediction id");
+        return;
+      }
+
+      let attempts = 0;
+      while (attempts < 60) {
+        await new Promise((r) => setTimeout(r, 3000));
+
+        const pollRes = await fetch(
+          `/api/replicate?id=${encodeURIComponent(predictionId)}`,
+        );
+        const pollData = await pollRes.json();
+
+        if (pollData.status === "succeeded") {
+          const output = pollData.output;
+
+          const outputText = (() => {
+            if (typeof output === "string") return output;
+            if (Array.isArray(output)) {
+              return output
+                .map((v) => (typeof v === "string" ? v : JSON.stringify(v)))
+                .join("");
+            }
+            return output ? String(output) : "";
+          })();
+
+          setRaw(outputText);
+          const { data: parsed, error } = sanitizeAndParse(outputText);
+          if (error) {
+            console.error("Replicate extract raw text (unparsed):", outputText);
+            setExtractError(error);
+          } else {
+            setData(parsed as JsonValue);
+            setExtractError(null);
+          }
+          return;
+        }
+
+        if (pollData.status === "failed" || pollData.status === "canceled") {
+          setExtractError(pollData.error || "Prediction failed");
+          return;
+        }
+
+        attempts++;
+      }
+
+      setExtractError("Timeout after 3 minutes");
     } catch (e) {
       setExtractError((e as Error).message);
     } finally {
@@ -1131,7 +1171,7 @@ export default function Page() {
             {/* Extract button */}
             <button
               onClick={handleExtractJson}
-              disabled={!imageBase64 || !geminiKey || loadingExtract}
+              disabled={!imageBase64 || loadingExtract}
               className="w-full py-3 bg-yellow-400 text-black text-sm font-bold rounded-xl hover:bg-yellow-300 disabled:opacity-40 disabled:cursor-not-allowed transition-all focus:outline-none flex items-center justify-center gap-2"
               type="button"
             >
