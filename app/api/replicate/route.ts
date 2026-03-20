@@ -13,6 +13,9 @@ const MODEL_CONFIGS: Record<
 
 export async function POST(req: NextRequest) {
   const { modelId, input } = await req.json();
+  console.log("Replicate API called with modelId:", modelId);
+  console.log("Token exists:", !!REPLICATE_API_TOKEN);
+  console.log("Input keys:", Object.keys(input));
 
   if (!REPLICATE_API_TOKEN) {
     return NextResponse.json(
