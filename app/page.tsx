@@ -99,6 +99,7 @@ export default function Home() {
   const [workflowData, setWorkflowData] = useState<JsonValue | null>(null);
   const [jsonText, setJsonText] = useState<string>("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [promptCopiedIndex, setPromptCopiedIndex] = useState<number | null>(null);
 
   const parseJsonText = (text: string) => {
     setErrorMessage(null);
@@ -108,6 +109,27 @@ export default function Home() {
     } catch {
       setWorkflowData(null);
       setErrorMessage("Invalid JSON. Paste a valid workflow JSON, then press Load JSON.");
+    }
+  };
+
+  const copyTextToClipboard = async (text: string) => {
+    await navigator.clipboard.writeText(text);
+  };
+
+  const copyTextToClipboardWithFallback = async (text: string) => {
+    try {
+      await copyTextToClipboard(text);
+    } catch {
+      // Fallback for environments where the Clipboard API is blocked.
+      const textarea = document.createElement("textarea");
+      textarea.value = text;
+      textarea.setAttribute("readonly", "true");
+      textarea.style.position = "absolute";
+      textarea.style.left = "-9999px";
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand("copy");
+      document.body.removeChild(textarea);
     }
   };
 
@@ -129,29 +151,37 @@ export default function Home() {
 
     const updatedText = JSON.stringify(workflowData, null, 2);
     try {
-      await navigator.clipboard.writeText(updatedText);
+      await copyTextToClipboardWithFallback(updatedText);
       setCopyStatus("Copied!");
       window.setTimeout(() => setCopyStatus(null), 1500);
     } catch {
-      // Fallback for environments where the Clipboard API is blocked.
-      try {
-        const textarea = document.createElement("textarea");
-        textarea.value = updatedText;
-        textarea.setAttribute("readonly", "true");
-        textarea.style.position = "absolute";
-        textarea.style.left = "-9999px";
-        document.body.appendChild(textarea);
-        textarea.select();
-        document.execCommand("copy");
-        document.body.removeChild(textarea);
-        setCopyStatus("Copied!");
-        window.setTimeout(() => setCopyStatus(null), 1500);
-      } catch {
-        setCopyStatus("Copy failed");
-        window.setTimeout(() => setCopyStatus(null), 2000);
-      }
+      setCopyStatus("Copy failed");
+      window.setTimeout(() => setCopyStatus(null), 2000);
     }
   };
+
+  const promptButtons: Array<{ label: string; promptText: string }> = [
+    {
+      label: "Prompt: Objects & Materials",
+      promptText:
+        "Analyze this image and output a precise JSON structure for Nano Banana 2. Focus ONLY on objects, furniture, and clothing. List each main item with its 'type', 'material', 'color', and 'position'. Output ONLY valid JSON code without backticks or markdown.",
+    },
+    {
+      label: "Prompt: Lighting & Weather",
+      promptText:
+        "Analyze this image and output a precise JSON structure for Nano Banana 2. Focus ONLY on lighting and environment. Include 'time_of_day', 'weather_conditions', 'key_light_direction', 'shadow_style', and 'ambient_color'. Output ONLY valid JSON code without backticks or markdown.",
+    },
+    {
+      label: "Prompt: Camera & Perspective",
+      promptText:
+        "Analyze this image and output a precise JSON structure for Nano Banana 2. Focus ONLY on the camera setup. Include 'focal_length', 'camera_angle', 'depth_of_field', 'perspective', and 'framing'. Output ONLY valid JSON code without backticks or markdown.",
+    },
+    {
+      label: "Prompt: Text & Logos",
+      promptText:
+        "Analyze this image and output a precise JSON structure for Nano Banana 2. Focus ONLY on typography and logos. Include 'text_content', 'font_style', 'color', 'background_material', and 'placement_coordinates'. Output ONLY valid JSON code without backticks or markdown.",
+    },
+  ];
 
   const renderEditor = (
     value: JsonValue,
@@ -331,6 +361,38 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-zinc-100 px-4 py-10">
       <div className="mx-auto grid w-full max-w-4xl gap-6">
+        <section className="grid gap-4 rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
+          <h2 className="text-xl font-semibold text-zinc-900">Generate JSON Prompts</h2>
+          <p className="text-sm text-zinc-600">
+            Click a prompt to copy it to your clipboard, then paste it into your AI tool.
+          </p>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            {promptButtons.map((button, idx) => {
+              const isCopied = promptCopiedIndex === idx;
+              return (
+                <button
+                  key={button.label}
+                  type="button"
+                  onClick={async () => {
+                    await copyTextToClipboardWithFallback(button.promptText);
+                    setPromptCopiedIndex(idx);
+                    window.setTimeout(() => setPromptCopiedIndex(null), 1500);
+                  }}
+                  className="rounded-lg bg-white px-4 py-3 text-left text-sm font-semibold text-zinc-900 shadow-sm ring-1 ring-zinc-200 transition hover:bg-zinc-50 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <span>{isCopied ? "Copied!" : button.label}</span>
+                    <span aria-hidden="true" className="text-zinc-400">
+                      ↵
+                    </span>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+
         <header className="grid gap-2">
           <h1 className="text-3xl font-bold text-zinc-900">Nano Banana 2 Visual JSON Editor</h1>
           <p className="text-zinc-600">
