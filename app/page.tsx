@@ -209,6 +209,11 @@ export default function Page() {
   const [loadingCreate, setLoadingCreate] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
 
+  const [replicateEngine, setReplicateEngine] = useState<
+    "flux-2-pro" | "seedream-5-lite" | "nano-banana-2"
+  >("nano-banana-2");
+  const [useReplicate, setUseReplicate] = useState(false);
+
   const [subject, setSubject] = useState("");
   const [angle, setAngle] = useState("");
   const [environment, setEnvironment] = useState("");
@@ -446,6 +451,83 @@ export default function Page() {
       setBase64(result.split(",")[1]);
     };
     reader.readAsDataURL(file);
+  };
+
+  const handleCreateImageReplicate = async () => {
+    setLoadingCreate(true);
+    setCreateError(null);
+    setCreatedImageUrl(null);
+    try {
+      const imageInputs: string[] = [];
+      if (faceBase64)
+        imageInputs.push(`data:image/jpeg;base64,${faceBase64}`);
+      if (outfitBase64)
+        imageInputs.push(`data:image/jpeg;base64,${outfitBase64}`);
+      if (globalBase64)
+        imageInputs.push(`data:image/jpeg;base64,${globalBase64}`);
+
+      let input: Record<string, unknown> = { prompt: createPrompt };
+
+      if (replicateEngine === "flux-2-pro") {
+        input = {
+          prompt: createPrompt,
+          aspect_ratio: "16:9",
+          output_format: "jpg",
+          resolution: "1 MP",
+          safety_tolerance: 2,
+          ...(imageInputs.length > 0 && { input_images: imageInputs }),
+        };
+      } else if (replicateEngine === "seedream-5-lite") {
+        input = {
+          prompt: createPrompt,
+          size: "2K",
+          aspect_ratio: "16:9",
+          output_format: "jpeg",
+          sequential_image_generation: "disabled",
+          ...(imageInputs.length > 0 && { image_input: imageInputs }),
+        };
+      } else if (replicateEngine === "nano-banana-2") {
+        input = {
+          prompt: createPrompt,
+          aspect_ratio: "16:9",
+          resolution: "1K",
+          output_format: "jpg",
+          google_search: false,
+          image_search: false,
+          ...(imageInputs.length > 0 && { image_input: imageInputs }),
+        };
+      }
+
+      const res = await fetch("/api/replicate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ modelId: replicateEngine, input }),
+      });
+
+      const data = await res.json();
+      if (data.error) {
+        setCreateError(data.error);
+        return;
+      }
+
+      const output = data.output;
+      let imageUrl = "";
+      if (Array.isArray(output)) {
+        imageUrl = output[0];
+      } else if (typeof output === "string") {
+        imageUrl = output;
+      }
+
+      if (imageUrl) {
+        setCreatedImageUrl(imageUrl);
+      } else {
+        setCreateError("המודל לא החזיר תמונה — נסה שוב.");
+      }
+    } catch (e) {
+      setCreateError((e as Error).message);
+    } finally {
+      setLoadingCreate(false);
+    }
   };
 
   const handleCreateImage = async () => {
@@ -756,9 +838,47 @@ export default function Page() {
                 dir="ltr"
                 className="w-full bg-zinc-800 text-zinc-200 text-sm font-mono rounded-lg px-4 py-3 border border-zinc-700 focus:border-yellow-500 focus:outline-none resize-y leading-relaxed"
               />
+              <div className="space-y-2">
+                <label className="text-xs text-zinc-500">מנוע יצירה</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={() => setUseReplicate(false)}
+                    className={`py-2 px-3 text-xs font-bold rounded-lg border transition-all focus:outline-none ${!useReplicate ? "bg-yellow-400 text-black border-yellow-400" : "bg-zinc-800 text-zinc-400 border-zinc-700 hover:border-zinc-500"}`}
+                  >
+                    🍌 Gemini
+                  </button>
+                  <button
+                    onClick={() => setUseReplicate(true)}
+                    className={`py-2 px-3 text-xs font-bold rounded-lg border transition-all focus:outline-none ${useReplicate ? "bg-yellow-400 text-black border-yellow-400" : "bg-zinc-800 text-zinc-400 border-zinc-700 hover:border-zinc-500"}`}
+                  >
+                    ⚡ Replicate
+                  </button>
+                </div>
+                {useReplicate && (
+                  <select
+                    value={replicateEngine}
+                    onChange={e =>
+                      setReplicateEngine(
+                        e.target.value as "flux-2-pro" | "seedream-5-lite" | "nano-banana-2",
+                      )
+                    }
+                    className="w-full bg-zinc-800 text-zinc-100 text-sm rounded-lg px-3 py-2 border border-zinc-700 focus:border-yellow-500 focus:outline-none"
+                  >
+                    <option value="nano-banana-2">
+                      🍌 Nano Banana 2 (Google) — מהיר
+                    </option>
+                    <option value="flux-2-pro">
+                      ⚡ Flux 2 Pro (Black Forest) — איכות גבוהה
+                    </option>
+                    <option value="seedream-5-lite">
+                      🧠 Seedream 5 Lite (ByteDance) — הכי חכם
+                    </option>
+                  </select>
+                )}
+              </div>
               <button
-                onClick={handleCreateImage}
-                disabled={!geminiKey || loadingCreate}
+                onClick={useReplicate ? handleCreateImageReplicate : handleCreateImage}
+                disabled={(!geminiKey && !useReplicate) || loadingCreate}
                 className="w-full py-4 bg-yellow-400 text-black text-base font-bold rounded-xl hover:bg-yellow-300 disabled:opacity-40 disabled:cursor-not-allowed transition-all focus:outline-none flex items-center justify-center gap-2"
                 type="button"
               >
