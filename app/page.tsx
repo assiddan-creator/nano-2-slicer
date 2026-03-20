@@ -47,8 +47,13 @@ import { useState, useCallback } from "react";
 
 function sanitizeAndParse(raw: string): { data: unknown; error: string | null } {
   try {
+    // Remove possible markdown code fences (Gemini sometimes wraps JSON).
+    const fenceStripped = raw
+      .replace(/```(?:json)?\s*/gi, "")
+      .replace(/```/g, "");
+
     // Step 1: Strip ALL invisible / directional / zero-width characters
-    const stripped = raw
+    const stripped = fenceStripped
       .replace(/[\u200B-\u200D\uFEFF\u200E\u200F\u2028\u2029\u00AD\u180E\u2060\uFFF9-\uFFFB]/g, "")
       .replace(/\u00A0/g, " ") // non-breaking space → regular space
       .replace(/\u202A-\u202E/g, "") // LTR/RTL embedding & override marks
@@ -345,6 +350,8 @@ export default function Page() {
     try {
       const allPromptsFlat = [...editablePrompts.general, ...editablePrompts.apps];
       const selectedPrompt = allPromptsFlat[selectedPromptIndex];
+      const extractionPrompt =
+        `${selectedPrompt.prompt}\n\nReturn ONLY a raw JSON object. Do not include any markdown, backticks, or conversational text.`;
       const response = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`,
         {
@@ -354,11 +361,15 @@ export default function Page() {
             contents: [
               {
                 parts: [
-                  { text: selectedPrompt.prompt },
+                  { text: extractionPrompt },
                   { inline_data: { mime_type: imageFile!.type, data: imageBase64 } },
                 ],
               },
             ],
+            generationConfig: {
+              responseModalities: ["TEXT"],
+              responseMimeType: "application/json",
+            },
           }),
         },
       );
@@ -367,6 +378,7 @@ export default function Page() {
       setRaw(text);
       const { data: parsed, error } = sanitizeAndParse(text);
       if (error) {
+        console.error("Gemini extract raw text (unparsed):", text);
         setExtractError(error);
       } else {
         setData(parsed as JsonValue);
