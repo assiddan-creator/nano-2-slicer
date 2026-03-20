@@ -2,20 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 
 const REPLICATE_API_TOKEN = process.env.REPLICATE_API_TOKEN || "";
 
-const MODEL_CONFIGS: Record<
-  string,
-  { version?: string; usePolling: boolean }
-> = {
-  "flux-2-pro": { usePolling: true },
-  "seedream-5-lite": { usePolling: true },
-  "nano-banana-2": { usePolling: true },
+const modelMap: Record<string, string> = {
+  "flux-2-pro": "black-forest-labs/flux-2-pro",
+  "seedream-5-lite": "bytedance/seedream-5-lite",
+  "nano-banana-2": "google/nano-banana-2",
 };
 
 export async function POST(req: NextRequest) {
   const { modelId, input } = await req.json();
-  console.log("Replicate API called with modelId:", modelId);
-  console.log("Token exists:", !!REPLICATE_API_TOKEN);
-  console.log("Input keys:", Object.keys(input));
 
   if (!REPLICATE_API_TOKEN) {
     return NextResponse.json(
@@ -24,31 +18,18 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const config = MODEL_CONFIGS[modelId];
-  if (!config) {
+  const fullModelId = modelMap[modelId];
+  if (!fullModelId) {
     return NextResponse.json({ error: "Unknown model" }, { status: 400 });
   }
 
-  const modelMap: Record<string, string> = {
-    "flux-2-pro": "black-forest-labs/flux-2-pro",
-    "seedream-5-lite": "bytedance/seedream-5-lite",
-    "nano-banana-2": "google/nano-banana-2",
-  };
-
-  const fullModelId = modelMap[modelId];
-
-  // Start prediction
   const startRes = await fetch("https://api.replicate.com/v1/predictions", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${REPLICATE_API_TOKEN}`,
       "Content-Type": "application/json",
-      Prefer: "wait=60",
     },
-    body: JSON.stringify({
-      model: fullModelId,
-      input,
-    }),
+    body: JSON.stringify({ model: fullModelId, input }),
   });
 
   const prediction = await startRes.json();
@@ -57,38 +38,25 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: prediction.error }, { status: 500 });
   }
 
-  // If already completed (sync response)
-  if (prediction.status === "succeeded") {
-    return NextResponse.json({ output: prediction.output });
-  }
-
-  // Poll until done
-  const predictionId = prediction.id;
-  let attempts = 0;
-  while (attempts < 60) {
-    await new Promise((r) => setTimeout(r, 3000));
-    const pollRes = await fetch(
-      `https://api.replicate.com/v1/predictions/${predictionId}`,
-      {
-        headers: { Authorization: `Bearer ${REPLICATE_API_TOKEN}` },
-      },
-    );
-    const pollData = await pollRes.json();
-    if (pollData.status === "succeeded") {
-      return NextResponse.json({ output: pollData.output });
-    }
-    if (pollData.status === "failed" || pollData.status === "canceled") {
-      return NextResponse.json(
-        { error: pollData.error || "Prediction failed" },
-        { status: 500 },
-      );
-    }
-    attempts++;
-  }
-
-  return NextResponse.json(
-    { error: "Timeout after 3 minutes" },
-    { status: 504 },
-  );
+  return NextResponse.json({ id: prediction.id, status: prediction.status });
 }
 
+export async function GET(req: NextRequest) {
+  const { searchParams } = new URL(req.url);
+  const id = searchParams.get("id");
+
+  if (!id) {
+    return NextResponse.json({ error: "Missing prediction id" }, { status: 400 });
+  }
+
+  if (!REPLICATE_API_TOKEN) {
+    return NextResponse.json({ error: "Missing REPLICATE_API_TOKEN" }, { status: 500 });
+  }
+
+  const res = await fetch(`https://api.replicate.com/v1/predictions/${id}`, {
+    headers: { Authorization: `Bearer ${REPLICATE_API_TOKEN}` },
+  });
+
+  const data = await res.json();
+  return NextResponse.json({ status: data.status, output: data.output, error: data.error });
+}
