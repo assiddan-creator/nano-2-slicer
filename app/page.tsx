@@ -520,12 +520,11 @@ export default function Page() {
 
       if (pollData.status === "succeeded") {
         const output = pollData.output;
-        console.log("Replicate output:", JSON.stringify(output));
         let imageUrl = "";
-        if (Array.isArray(output)) {
-          imageUrl = output[0];
-        } else if (typeof output === "string") {
+        if (typeof output === "string") {
           imageUrl = output;
+        } else if (Array.isArray(output)) {
+          imageUrl = output[0];
         } else if (output && typeof output === "object") {
           const vals = Object.values(output as Record<string, unknown>);
           imageUrl = vals[0] as string;
@@ -533,7 +532,7 @@ export default function Page() {
         if (imageUrl) {
           setCreatedImageUrl(imageUrl);
         } else {
-          setCreateError("המודל לא החזיר תמונה. פלט: " + JSON.stringify(output));
+          setCreateError("המודל לא החזיר תמונה — פלט: " + JSON.stringify(output));
         }
         return;
       }
@@ -554,12 +553,11 @@ export default function Page() {
 
         if (pollData.status === "succeeded") {
           const output = pollData.output;
-          console.log("Replicate output:", JSON.stringify(output));
           let imageUrl = "";
-          if (Array.isArray(output)) {
-            imageUrl = output[0];
-          } else if (typeof output === "string") {
+          if (typeof output === "string") {
             imageUrl = output;
+          } else if (Array.isArray(output)) {
+            imageUrl = output[0];
           } else if (output && typeof output === "object") {
             const vals = Object.values(output as Record<string, unknown>);
             imageUrl = vals[0] as string;
@@ -568,7 +566,7 @@ export default function Page() {
             setCreatedImageUrl(imageUrl);
           } else {
             setCreateError(
-              "המודל לא החזיר תמונה. פלט: " + JSON.stringify(output),
+              "המודל לא החזיר תמונה — פלט: " + JSON.stringify(output),
             );
           }
           return;

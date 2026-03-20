@@ -12,10 +12,7 @@ export async function POST(req: NextRequest) {
   const { modelId, input } = await req.json();
 
   if (!REPLICATE_API_TOKEN) {
-    return NextResponse.json(
-      { error: "Missing REPLICATE_API_TOKEN" },
-      { status: 500 },
-    );
+    return NextResponse.json({ error: "Missing REPLICATE_API_TOKEN" }, { status: 500 });
   }
 
   const fullModelId = modelMap[modelId];
@@ -26,16 +23,22 @@ export async function POST(req: NextRequest) {
   const startRes = await fetch("https://api.replicate.com/v1/predictions", {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${REPLICATE_API_TOKEN}`,
+      "Authorization": `Bearer ${REPLICATE_API_TOKEN}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({ model: fullModelId, input }),
   });
 
   const prediction = await startRes.json();
+
   if (prediction.error) {
     return NextResponse.json({ error: prediction.error }, { status: 500 });
   }
+
+  if (!prediction.id) {
+    return NextResponse.json({ error: "No prediction id returned", detail: prediction }, { status: 500 });
+  }
+
   return NextResponse.json({ id: prediction.id, status: prediction.status });
 }
 
@@ -52,17 +55,9 @@ export async function GET(req: NextRequest) {
   }
 
   const res = await fetch(`https://api.replicate.com/v1/predictions/${id}`, {
-    headers: { Authorization: `Bearer ${REPLICATE_API_TOKEN}` },
+    headers: { "Authorization": `Bearer ${REPLICATE_API_TOKEN}` },
   });
 
   const data = await res.json();
-  let output = data.output;
-  if (
-    output &&
-    typeof output === "object" &&
-    typeof (output as { url?: unknown }).url === "function"
-  ) {
-    output = (output as { url: () => unknown }).url();
-  }
-  return NextResponse.json({ status: data.status, output: output, error: data.error });
+  return NextResponse.json({ status: data.status, output: data.output, error: data.error });
 }
