@@ -466,9 +466,11 @@ export default function Page() {
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [geminiKey, setGeminiKey] = useState<string>(() => {
     try {
-      return localStorage.getItem("nb2_gemini_key") || "";
+      return (
+        localStorage.getItem("nb2_gemini_key") || process.env.NEXT_PUBLIC_GEMINI_API_KEY || ""
+      );
     } catch {
-      return "";
+      return process.env.NEXT_PUBLIC_GEMINI_API_KEY || "";
     }
   });
   const [selectedPromptIndex, setSelectedPromptIndex] = useState<number>(0);
