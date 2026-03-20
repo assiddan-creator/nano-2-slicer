@@ -133,8 +133,7 @@ function FieldEditor({
     onChange(path, raw);
   };
 
-  const labelCls =
-    "text-xs font-mono font-semibold tracking-wide truncate max-w-[140px]";
+  const labelCls = "text-xs font-mono font-semibold tracking-wide break-all max-w-[200px]";
 
   const keyLabel = (
     <span
@@ -268,8 +267,8 @@ function FieldEditor({
               defaultValue={value as string}
               onBlur={(e) => onChange(path, e.target.value)}
               onChange={(e) => onChange(path, e.target.value)}
-              className="w-8 h-7 rounded cursor-pointer border border-zinc-600 bg-transparent p-0.5 focus:outline-none focus:border-yellow-400"
-              title="בחר צבע"
+              className="w-10 h-9 rounded-lg cursor-pointer border-2 border-zinc-600 bg-transparent p-0.5 focus:outline-none focus:border-yellow-400 hover:border-yellow-500 transition-colors"
+              title="לחץ לבחירת צבע"
             />
           </div>
           <input
@@ -280,7 +279,7 @@ function FieldEditor({
             dir="ltr"
           />
           <div
-            className="w-7 h-7 rounded border border-zinc-600 flex-shrink-0"
+            className="w-8 h-8 rounded-lg border-2 border-zinc-500 flex-shrink-0 shadow-lg"
             style={{ backgroundColor: value as string }}
             title={value as string}
           />
