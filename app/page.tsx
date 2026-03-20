@@ -456,7 +456,27 @@ export default function Page() {
   const [parseError, setParseError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [copiedPrompt, setCopiedPrompt] = useState<number | null>(null);
+  // kept for backward compatibility with earlier prompt-copy UX
+  void copiedPrompt;
+  void setCopiedPrompt;
   const [view, setView] = useState<"form" | "raw">("form");
+
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imageBase64, setImageBase64] = useState<string | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [geminiKey, setGeminiKey] = useState<string>(() => {
+    try {
+      return localStorage.getItem("nb2_gemini_key") || "";
+    } catch {
+      return "";
+    }
+  });
+  const [selectedPromptIndex, setSelectedPromptIndex] = useState<number>(0);
+  const [loadingExtract, setLoadingExtract] = useState(false);
+  const [loadingGenerate, setLoadingGenerate] = useState(false);
+  const [generatedImageUrl, setGeneratedImageUrl] = useState<string | null>(null);
+  const [extractError, setExtractError] = useState<string | null>(null);
+  const [generateError, setGenerateError] = useState<string | null>(null);
 
   const handleParse = useCallback(() => {
     const { data: parsed, error } = sanitizeAndParse(raw);
@@ -484,8 +504,6 @@ export default function Page() {
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   }, [data]);
-
-  const hasData = data !== null;
 
   const promptLibrary = [
     {
@@ -561,6 +579,106 @@ export default function Page() {
     localStorage.setItem("nb2_prompts", JSON.stringify(updated));
   };
 
+  const handleImageUpload = (file: File) => {
+    setImageFile(file);
+    setGeneratedImageUrl(null);
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const result = e.target?.result as string;
+      setImagePreview(result);
+      setImageBase64(result.split(",")[1]);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleExtractJson = async () => {
+    if (!imageBase64 || !geminiKey) return;
+    setLoadingExtract(true);
+    setExtractError(null);
+    try {
+      const allPromptsFlat = [...editablePrompts.general, ...editablePrompts.apps];
+      const selectedPrompt = allPromptsFlat[selectedPromptIndex];
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [
+              {
+                parts: [
+                  { text: selectedPrompt.prompt },
+                  { inline_data: { mime_type: imageFile!.type, data: imageBase64 } },
+                ],
+              },
+            ],
+          }),
+        },
+      );
+      const result = await response.json();
+      const text = result?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+      setRaw(text);
+      const { data: parsed, error } = sanitizeAndParse(text);
+      if (error) {
+        setExtractError(error);
+      } else {
+        setData(parsed as JsonValue);
+        setExtractError(null);
+      }
+    } catch (e) {
+      setExtractError((e as Error).message);
+    } finally {
+      setLoadingExtract(false);
+    }
+  };
+
+  const handleGenerateImage = async () => {
+    if (!imageBase64 || !geminiKey || !data) return;
+    setLoadingGenerate(true);
+    setGenerateError(null);
+    setGeneratedImageUrl(null);
+    try {
+      const jsonString = JSON.stringify(data, null, 2);
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-preview-image-generation:generateContent?key=${geminiKey}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [
+              {
+                parts: [
+                  {
+                    text: `Modify this image based on the following JSON. Change ONLY what is specified in the JSON values that differ from the original. Keep everything else 100% identical — same camera angle, same perspective, same lighting direction, same shadows, same room layout, same proportions.\n\nJSON:\n${jsonString}`,
+                  },
+                  { inline_data: { mime_type: imageFile!.type, data: imageBase64 } },
+                ],
+              },
+            ],
+            generationConfig: { responseModalities: ["IMAGE", "TEXT"] },
+          }),
+        },
+      );
+      const result = await response.json();
+      const parts = result?.candidates?.[0]?.content?.parts || [];
+      const imagePart = parts.find(
+        (p: { inlineData?: { mimeType: string; data: string } }) =>
+          p.inlineData?.mimeType?.startsWith("image/"),
+      );
+      if (imagePart && imagePart.inlineData) {
+        setGeneratedImageUrl(
+          `data:${imagePart.inlineData.mimeType};base64,${imagePart.inlineData.data}`,
+        );
+      } else {
+        setGenerateError("ג'מיני לא החזיר תמונה — נסה שוב או החלף מודל.");
+      }
+    } catch (e) {
+      setGenerateError((e as Error).message);
+    } finally {
+      setLoadingGenerate(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 font-mono">
       {/* ── Header ── */}
@@ -571,253 +689,338 @@ export default function Page() {
             <h1 className="text-base font-bold text-yellow-300 tracking-tight leading-none">
               Nano Banana 2
             </h1>
-            <p className="text-xs text-zinc-500 mt-0.5">Visual JSON Editor</p>
+            <p className="text-xs text-zinc-500 mt-0.5">Visual JSON Image Editor</p>
           </div>
         </div>
-        <div className="text-xs text-zinc-600 flex items-center gap-3">
-          <span>עברית-בטוח · ניקוי תווים בלתי נראים</span>
-          <button
-            onClick={() => setEditorOpen(true)}
-            className="text-xs px-3 py-1.5 rounded-lg border border-zinc-700 text-zinc-400 hover:border-yellow-500 hover:text-yellow-300 transition-all focus:outline-none"
-            type="button"
-          >
-            ✏️ ערוך פרומפטים
-          </button>
-        </div>
+        <button
+          onClick={() => setEditorOpen(true)}
+          className="text-xs px-3 py-1.5 rounded-lg border border-zinc-700 text-zinc-400 hover:border-yellow-500 hover:text-yellow-300 transition-all focus:outline-none"
+        >
+          ✏️ ערוך פרומפטים
+        </button>
       </header>
 
-      <main className="p-6 max-w-5xl mx-auto space-y-6">
-        {/* ── Input Area ── */}
-        <section className="space-y-2">
-          <div>
-            <p className="text-xs uppercase tracking-widest text-zinc-500 mb-2">
-              📋 ספריית פרומפטים לתמונה
-            </p>
-            <div className="grid grid-cols-2 gap-2 mb-4">
-              {editablePrompts.general.map(
-                (promptItem: { label: string; description: string; prompt: string }, i: number) => (
-                <button
-                  key={promptItem.label}
-                  onClick={() => {
-                    navigator.clipboard
-                      .writeText(editablePrompts.general[i].prompt)
-                      .then(() => {
-                      setCopiedPrompt(i);
-                      setTimeout(() => setCopiedPrompt(null), 2000);
-                    });
-                  }}
-                  className={
-                    "text-left p-3 rounded-lg border transition-all focus:outline-none focus:ring-2 focus:ring-yellow-400 focus:ring-offset-2 focus:ring-offset-zinc-950 bg-zinc-900 " +
-                    (copiedPrompt === i
-                      ? "border-emerald-500"
-                      : "border-zinc-700 hover:border-yellow-500")
-                  }
-                  type="button"
-                >
-                  <div className="text-sm font-semibold text-zinc-100 flex items-center gap-1">
-                    {copiedPrompt === i ? "✓ " : ""}
-                    {editablePrompts.general[i].label}
-                  </div>
-                  <div className="text-xs text-zinc-500 mt-1">
-                    {editablePrompts.general[i].description}
-                  </div>
-                </button>
-              ))}
-            </div>
-
-            <p className="text-xs uppercase tracking-widest text-zinc-500 mb-2 mt-4">🚀 פרומפטים לאפליקציות שלי</p>
-
-            {/* First row — 2 buttons: index 0 and 1 */}
-            <div className="grid grid-cols-2 gap-2 mb-2">
-              {editablePrompts.apps.slice(0, 2).map(
-                (p: { label: string; description: string; prompt: string }, i: number) => (
-                <button
-                  key={i}
-                  onClick={() => {
-                    navigator.clipboard.writeText(p.prompt).then(() => {
-                      setCopiedPrompt(4 + i);
-                      setTimeout(() => setCopiedPrompt(null), 2000);
-                    });
-                  }}
-                  className={
-                    "text-left p-3 rounded-lg border transition-all focus:outline-none focus:ring-2 focus:ring-yellow-400 focus:ring-offset-2 focus:ring-offset-zinc-950 bg-zinc-900 " +
-                    (copiedPrompt === 4 + i
-                      ? "border-emerald-500"
-                      : "border-zinc-700 hover:border-yellow-500")
-                  }
-                >
-                  <div className="text-sm font-semibold text-zinc-100">
-                    {copiedPrompt === 4 + i ? "✓ " : ""}
-                    {p.label}
-                  </div>
-                  <div className="text-xs text-zinc-500 mt-1">{p.description}</div>
-                </button>
-              ),
-              )}
-            </div>
-
-            {/* Second row — 3 buttons: index 2, 3 and 4 */}
-            <div className="grid grid-cols-3 gap-2 mb-4">
-              {editablePrompts.apps.slice(2, 5).map(
-                (p: { label: string; description: string; prompt: string }, i: number) => (
-                <button
-                  key={i + 2}
-                  onClick={() => {
-                    navigator.clipboard.writeText(p.prompt).then(() => {
-                      setCopiedPrompt(6 + i);
-                      setTimeout(() => setCopiedPrompt(null), 2000);
-                    });
-                  }}
-                  className={
-                    "text-left p-3 rounded-lg border transition-all focus:outline-none focus:ring-2 focus:ring-yellow-400 focus:ring-offset-2 focus:ring-offset-zinc-950 bg-zinc-900 " +
-                    (copiedPrompt === 6 + i
-                      ? "border-emerald-500"
-                      : "border-zinc-700 hover:border-yellow-500")
-                  }
-                >
-                  <div className="text-sm font-semibold text-zinc-100">
-                    {copiedPrompt === 6 + i ? "✓ " : ""}
-                    {p.label}
-                  </div>
-                  <div className="text-xs text-zinc-500 mt-1">{p.description}</div>
-                </button>
-              ),
-              )}
-            </div>
-          </div>
-          <label className="text-xs text-zinc-400 uppercase tracking-widest">הדבק JSON כאן</label>
-          <textarea
-            value={raw}
-            onChange={(e) => setRaw(e.target.value)}
-            placeholder={'{\n  "key": "value"\n}'}
-            rows={7}
-            dir="ltr"
-            spellCheck={false}
-            className="w-full bg-zinc-900 text-zinc-100 text-sm font-mono rounded-lg
-                       px-4 py-3 border border-zinc-700 focus:border-yellow-500
-                       focus:outline-none resize-y leading-relaxed placeholder-zinc-700"
-          />
-          <div className="flex gap-3 items-center flex-wrap">
-            <button
-              onClick={handleParse}
-              className="px-4 py-2 bg-yellow-400 text-black text-sm font-bold rounded-lg
-                         hover:bg-yellow-300 active:bg-yellow-500 transition-colors
-                         focus:outline-none focus:ring-2 focus:ring-yellow-400 focus:ring-offset-2
-                         focus:ring-offset-zinc-950"
-            >
-              ⟳ פרסר JSON
-            </button>
-            {raw && (
-              <button
-                onClick={() => {
-                  setRaw("");
-                  setData(null);
-                  setParseError(null);
-                }}
-                className="px-3 py-2 text-xs text-zinc-500 hover:text-zinc-200
-                           border border-zinc-700 rounded-lg transition-colors focus:outline-none"
-              >
-                נקה
-              </button>
-            )}
-            {parseError && (
-              <span
-                className="text-xs text-rose-400 bg-rose-950 border border-rose-800
-                               px-3 py-1.5 rounded-lg max-w-md truncate"
-                title={parseError}
-              >
-                ⚠ {parseError}
+      <main className="p-6 max-w-7xl mx-auto">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* ── COLUMN 1: Upload + Extract ── */}
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-4">
+            <h2 className="text-sm font-bold text-zinc-100 flex items-center gap-2">
+              <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-yellow-400 text-black text-xs font-bold">
+                1
               </span>
-            )}
-          </div>
-        </section>
+              העלה תמונה וחלץ JSON
+            </h2>
 
-        {/* ── Editor Area ── */}
-        {hasData && (
-          <section className="space-y-3">
-            {/* Toolbar */}
-            <div className="flex items-center justify-between flex-wrap gap-3">
-              <div className="flex bg-zinc-900 border border-zinc-700 rounded-lg p-0.5 gap-0.5">
-                <button
-                  onClick={() => setView("form")}
-                  className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors focus:outline-none
-                    ${view === "form" ? "bg-yellow-400 text-black" : "text-zinc-400 hover:text-zinc-100"}`}
-                >
-                  📋 טופס
-                </button>
-                <button
-                  onClick={() => setView("raw")}
-                  className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors focus:outline-none
-                    ${view === "raw" ? "bg-yellow-400 text-black" : "text-zinc-400 hover:text-zinc-100"}`}
-                >
-                  {"{ }"} JSON גולמי
-                </button>
-              </div>
-              <button
-                onClick={handleCopy}
-                className={`px-4 py-2 text-sm font-bold rounded-lg border transition-all
-                  focus:outline-none focus:ring-2 focus:ring-yellow-400 focus:ring-offset-2
-                  focus:ring-offset-zinc-950
-                  ${
-                    copied
-                      ? "border-emerald-500 text-emerald-300 bg-emerald-950"
-                      : "border-yellow-600 text-yellow-300 hover:bg-yellow-950"
-                  }`}
-              >
-                {copied ? "✓ הועתק!" : "⎘ העתק JSON"}
-              </button>
+            {/* API Key */}
+            <div className="space-y-1">
+              <label className="text-xs text-zinc-500">מפתח Gemini API</label>
+              <input
+                type="password"
+                value={geminiKey}
+                onChange={(e) => {
+                  setGeminiKey(e.target.value);
+                  try {
+                    localStorage.setItem("nb2_gemini_key", e.target.value);
+                  } catch {}
+                }}
+                placeholder="AIza..."
+                className="w-full bg-zinc-800 text-zinc-100 text-xs font-mono rounded-lg px-3 py-2 border border-zinc-700 focus:border-yellow-500 focus:outline-none"
+                dir="ltr"
+              />
             </div>
 
-            {/* Form view */}
-            {view === "form" && (
-              <div className="bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-4
-                              max-h-[60vh] overflow-y-auto">
-                {Array.isArray(data) ? (
-                  (data as JsonArray).map((item, i) => (
-                    <FieldEditor
-                      key={i}
-                      path={[String(i)]}
-                      keyName={String(i)}
-                      value={item}
-                      onChange={handleChange}
-                      onDelete={handleDelete}
-                      depth={0}
-                    />
-                  ))
+            {/* Image Upload */}
+            <div className="space-y-1">
+              <label className="text-xs text-zinc-500">תמונה</label>
+              <div
+                onClick={() => document.getElementById("nb2-file-input")?.click()}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  const f = e.dataTransfer.files[0];
+                  if (f) handleImageUpload(f);
+                }}
+                onDragOver={(e) => e.preventDefault()}
+                className={`cursor-pointer rounded-xl border-2 border-dashed transition-all flex items-center justify-center overflow-hidden
+                  ${imagePreview ? "border-zinc-700 p-0" : "border-zinc-700 hover:border-yellow-500 p-8 text-center"}`}
+              >
+                {imagePreview ? (
+                  <img
+                    src={imagePreview}
+                    alt="preview"
+                    className="w-full max-h-52 object-contain rounded-xl"
+                  />
                 ) : (
-                  Object.entries(data as JsonObject).map(([k, v]) => (
-                    <FieldEditor
-                      key={k}
-                      path={[k]}
-                      keyName={k}
-                      value={v}
-                      onChange={handleChange}
-                      onDelete={handleDelete}
-                      depth={0}
-                    />
-                  ))
+                  <div className="space-y-1">
+                    <div className="text-3xl">📁</div>
+                    <p className="text-xs text-zinc-500">גרור תמונה לכאן או לחץ לבחירה</p>
+                  </div>
                 )}
               </div>
-            )}
+              <input
+                id="nb2-file-input"
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) handleImageUpload(f);
+                }}
+              />
+              {imagePreview && (
+                <button
+                  onClick={() => document.getElementById("nb2-file-input")?.click()}
+                  className="text-xs text-zinc-500 hover:text-yellow-300 transition-colors focus:outline-none"
+                  type="button"
+                >
+                  🔄 החלף תמונה
+                </button>
+              )}
+            </div>
 
-            {/* Raw view */}
-            {view === "raw" && (
-              <pre
-                className="bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-4
-                              text-xs text-zinc-300 overflow-auto max-h-[60vh] leading-relaxed"
-                dir="ltr"
+            {/* Prompt selector */}
+            <div className="space-y-1">
+              <label className="text-xs text-zinc-500">פרומפט לחילוץ</label>
+              <select
+                value={selectedPromptIndex}
+                onChange={(e) => setSelectedPromptIndex(Number(e.target.value))}
+                className="w-full bg-zinc-800 text-zinc-100 text-xs rounded-lg px-3 py-2 border border-zinc-700 focus:border-yellow-500 focus:outline-none"
               >
-                {JSON.stringify(data, null, 2)}
-              </pre>
-            )}
-          </section>
-        )}
-      </main>
+                <optgroup label="כלליים">
+                  {editablePrompts.general.map((p: { label: string }, i: number) => (
+                    <option key={i} value={i}>
+                      {p.label}
+                    </option>
+                  ))}
+                </optgroup>
+                <optgroup label="האפליקציות שלי">
+                  {editablePrompts.apps.map((p: { label: string }, i: number) => (
+                    <option key={i + editablePrompts.general.length} value={i + editablePrompts.general.length}>
+                      {p.label}
+                    </option>
+                  ))}
+                </optgroup>
+              </select>
+            </div>
 
-      {/* ── Footer ── */}
-      <footer className="mt-12 pb-6 text-center text-xs text-zinc-700">
-        מנקה: U+200B–200D · FEFF · 200E/F · A0 · 202A–202E
-      </footer>
+            {/* Extract button */}
+            <button
+              onClick={handleExtractJson}
+              disabled={!imageBase64 || !geminiKey || loadingExtract}
+              className="w-full py-3 bg-yellow-400 text-black text-sm font-bold rounded-xl hover:bg-yellow-300 disabled:opacity-40 disabled:cursor-not-allowed transition-all focus:outline-none flex items-center justify-center gap-2"
+              type="button"
+            >
+              {loadingExtract ? (
+                <>
+                  <span className="animate-spin inline-block w-4 h-4 border-2 border-black border-t-transparent rounded-full" />
+                  מחלץ JSON...
+                </>
+              ) : (
+                "🔍 חלץ JSON מהתמונה"
+              )}
+            </button>
+
+            {extractError && (
+              <p className="text-xs text-rose-400 bg-rose-950 border border-rose-800 px-3 py-2 rounded-lg">
+                {extractError}
+              </p>
+            )}
+          </div>
+
+          {/* ── COLUMN 2: JSON Editor ── */}
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-4">
+            <h2 className="text-sm font-bold text-zinc-100 flex items-center gap-2">
+              <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-yellow-400 text-black text-xs font-bold">
+                2
+              </span>
+              ערוך את ה-JSON
+            </h2>
+
+            {/* Raw textarea */}
+            <textarea
+              value={raw}
+              onChange={(e) => setRaw(e.target.value)}
+              placeholder={'{\n  "key": "value"\n}'}
+              rows={5}
+              dir="ltr"
+              spellCheck={false}
+              className="w-full bg-zinc-800 text-zinc-100 text-xs font-mono rounded-lg px-3 py-2 border border-zinc-700 focus:border-yellow-500 focus:outline-none resize-none"
+            />
+
+            <div className="flex gap-2 flex-wrap">
+              <button
+                onClick={handleParse}
+                className="px-3 py-1.5 bg-yellow-400 text-black text-xs font-bold rounded-lg hover:bg-yellow-300 transition-colors focus:outline-none"
+                type="button"
+              >
+                ⟳ פרסר JSON
+              </button>
+              {raw && (
+                <button
+                  onClick={() => {
+                    setRaw("");
+                    setData(null);
+                    setParseError(null);
+                  }}
+                  className="px-3 py-1.5 text-xs text-zinc-500 hover:text-zinc-200 border border-zinc-700 rounded-lg transition-colors focus:outline-none"
+                  type="button"
+                >
+                  נקה
+                </button>
+              )}
+              {parseError && <span className="text-xs text-rose-400">{parseError}</span>}
+            </div>
+
+            {/* Form/Raw toggle + Copy */}
+            {data !== null && (
+              <>
+                <div className="flex items-center justify-between">
+                  <div className="flex bg-zinc-800 border border-zinc-700 rounded-lg p-0.5 gap-0.5">
+                    <button
+                      onClick={() => setView("form")}
+                      className={`px-3 py-1 text-xs font-semibold rounded-md transition-colors focus:outline-none ${
+                        view === "form"
+                          ? "bg-yellow-400 text-black"
+                          : "text-zinc-400 hover:text-zinc-100"
+                      }`}
+                      type="button"
+                    >
+                      📋 טופס
+                    </button>
+                    <button
+                      onClick={() => setView("raw")}
+                      className={`px-3 py-1 text-xs font-semibold rounded-md transition-colors focus:outline-none ${
+                        view === "raw"
+                          ? "bg-yellow-400 text-black"
+                          : "text-zinc-400 hover:text-zinc-100"
+                      }`}
+                      type="button"
+                    >
+                      {"{ }"} גולמי
+                    </button>
+                  </div>
+                  <button
+                    onClick={handleCopy}
+                    className={`px-3 py-1.5 text-xs font-bold rounded-lg border transition-all focus:outline-none ${
+                      copied
+                        ? "border-emerald-500 text-emerald-300"
+                        : "border-zinc-700 text-zinc-300 hover:border-yellow-500"
+                    }`}
+                    type="button"
+                  >
+                    {copied ? "✓ הועתק!" : "⎘ העתק JSON"}
+                  </button>
+                </div>
+
+                {view === "form" && (
+                  <div className="bg-zinc-800 rounded-xl px-3 py-3 max-h-96 overflow-y-auto">
+                    {Array.isArray(data) ? (
+                      (data as JsonArray).map((item, i) => (
+                        <FieldEditor
+                          key={i}
+                          path={[String(i)]}
+                          keyName={String(i)}
+                          value={item}
+                          onChange={handleChange}
+                          onDelete={handleDelete}
+                          depth={0}
+                        />
+                      ))
+                    ) : (
+                      Object.entries(data as JsonObject).map(([k, v]) => (
+                        <FieldEditor
+                          key={k}
+                          path={[k]}
+                          keyName={k}
+                          value={v}
+                          onChange={handleChange}
+                          onDelete={handleDelete}
+                          depth={0}
+                        />
+                      ))
+                    )}
+                  </div>
+                )}
+
+                {view === "raw" && (
+                  <pre
+                    className="bg-zinc-800 rounded-xl px-3 py-3 text-xs text-zinc-300 overflow-auto max-h-96"
+                    dir="ltr"
+                  >
+                    {JSON.stringify(data, null, 2)}
+                  </pre>
+                )}
+              </>
+            )}
+          </div>
+
+          {/* ── COLUMN 3: Generate Image ── */}
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-4">
+            <h2 className="text-sm font-bold text-zinc-100 flex items-center gap-2">
+              <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-yellow-400 text-black text-xs font-bold">
+                3
+              </span>
+              צור תמונה חדשה
+            </h2>
+
+            {imagePreview && (
+              <div className="space-y-1">
+                <p className="text-xs text-zinc-500">תמונה מקורית</p>
+                <img
+                  src={imagePreview}
+                  alt="original"
+                  className="w-full max-h-36 object-contain rounded-lg border border-zinc-700"
+                />
+              </div>
+            )}
+
+            <button
+              onClick={handleGenerateImage}
+              disabled={!data || !imageBase64 || !geminiKey || loadingGenerate}
+              className="w-full py-4 bg-yellow-400 text-black text-sm font-bold rounded-xl hover:bg-yellow-300 disabled:opacity-40 disabled:cursor-not-allowed transition-all focus:outline-none flex items-center justify-center gap-2"
+              type="button"
+            >
+              {loadingGenerate ? (
+                <>
+                  <span className="animate-spin inline-block w-4 h-4 border-2 border-black border-t-transparent rounded-full" />
+                  מייצר תמונה...
+                </>
+              ) : (
+                "✨ צור תמונה חדשה"
+              )}
+            </button>
+
+            {generateError && (
+              <p className="text-xs text-rose-400 bg-rose-950 border border-rose-800 px-3 py-2 rounded-lg">
+                {generateError}
+              </p>
+            )}
+
+            {generatedImageUrl && (
+              <div className="space-y-3">
+                <p className="text-xs text-emerald-400 font-semibold">✓ התמונה מוכנה!</p>
+                <img
+                  src={generatedImageUrl}
+                  alt="generated"
+                  className="w-full rounded-xl border border-zinc-700"
+                />
+                <a
+                  href={generatedImageUrl}
+                  download="nano-banana-result.png"
+                  className="block w-full text-center py-2 border border-zinc-700 text-zinc-300 text-xs font-semibold rounded-lg hover:border-yellow-500 hover:text-yellow-300 transition-all"
+                >
+                  ⬇ הורד תמונה
+                </a>
+              </div>
+            )}
+
+            {!generatedImageUrl && !loadingGenerate && (
+              <div className="text-center py-8 text-zinc-700 text-xs">
+                השלם שלבים 1 ו-2 כדי לייצר תמונה
+              </div>
+            )}
+          </div>
+        </div>
+      </main>
 
       {editorOpen && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
